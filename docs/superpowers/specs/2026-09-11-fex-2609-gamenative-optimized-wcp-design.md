@@ -2,64 +2,72 @@
 
 ## Goal
 
-Produce reproducible GameNative-focused FEXCore 2609 Windows compatibility packages (`.wcp`) directly from the `FEX-2609` source commit and publish test candidates as GitHub prereleases from the FEX fork.
+Produce reproducible GameNative-focused FEXCore 2609 Windows compatibility packages (`.wcp`) from the exact upstream FEX-2609 source commit and publish controlled test candidates as GitHub prereleases from this fork.
 
-The source baseline is the exact upstream FEX-2609 commit:
+Pinned source:
 
 `395b132f346b1a45def246d10c52245edba1ef02`
 
-No post-2609 source changes are included in the binaries unless explicitly documented in a later experimental branch.
+No post-2609 FEX runtime/JIT source changes are included in these binaries.
 
-## Scope
+## Final candidate set
 
-This work adds a dedicated GitHub Actions pipeline and packaging metadata. It does not modify FEXCore runtime semantics, JIT behavior, host feature detection, or GameNative itself.
+The prerelease contains two candidates built from identical FEX source and the same pinned compiler toolchain.
 
-The first prerelease contains two build candidates from identical source and toolchain inputs:
+### O3 control
 
-1. `FEXCore-2609-GameNative-O3.wcp`
-   - Release build (`-O3 -DNDEBUG` through CMake Release mode)
-   - assertions off
-   - tests off
-   - generic AArch64 tuning
-   - LTO off
-   - intended as the controlled GameNative baseline
+`FEXCore-2609-GameNative-O3.wcp`
 
-2. `FEXCore-2609-GameNative-O3-LTO.wcp`
-   - same inputs as the O3 candidate
-   - CMake interprocedural optimization enabled through `ENABLE_LTO=True`
-   - intended as the primary optimized candidate
+- CMake `Release` / O3
+- assertions off
+- tests off
+- LTO off
+- `TUNE_ARCH=generic`
+- `TUNE_CPU=generic`
+- conservative ARM64 ISA baseline
+- intended as the control build
 
-PGO is intentionally not fabricated in CI. A real PGO build requires representative GameNative workload profiles collected on target devices. The workflow may be extended later to consume validated profile data, but this prerelease must not label an untrained binary as PGO-optimized.
+### O3 MobileTune
+
+`FEXCore-2609-GameNative-O3-MobileTune.wcp`
+
+- same source and common release configuration as the control
+- LTO off
+- `TUNE_ARCH=generic`
+- `TUNE_CPU=none`
+- `CMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76`
+- `CMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76`
+- retains the generic `armv8-a+crc` ISA baseline; the added `-mtune` changes scheduling rather than enabling additional ISA extensions
+- intended as the primary GameNative mobile scheduling experiment
+
+## Why LTO is not shipped
+
+An O3+LTO candidate was implemented and exercised in CI. FEX configured and compiled successfully, but ARM64EC ThinLTO failed during the final `libFEXCore.dll` link with unresolved EC-side libc++/Win32 symbols. This matches the current upstream LLVM ARM64EC LTO limitation tracked in `llvm/llvm-project#168469` and ARM64EC tracking issue `#179532`.
+
+The pipeline therefore does not use linker workarounds or claim an LTO optimization that cannot be produced reliably with the pinned toolchain.
+
+PGO is also intentionally not claimed. A valid PGO build requires representative GameNative workload profiles collected from real gaming runs; that is a separate future experiment.
 
 ## Toolchain and build environment
 
-The workflow runs on a GitHub-hosted Ubuntu x86_64 runner and installs a pinned `bylaws/llvm-mingw` release rather than depending on a mutable self-hosted runner environment.
+The workflow runs on GitHub-hosted Ubuntu 24.04 x86_64 and installs a checksum-verified compiler rather than depending on mutable runner state.
 
 Pinned toolchain:
 
 - `bylaws/llvm-mingw` tag `20250920`
-- UCRT Ubuntu x86_64 archive
+- clang 21.1.0
+- archive SHA-256 `8dd8c34fc051a50c2fae86015f35057f8aae93fe1e19b34537ef1269a8b4c772`
 
-Both required MinGW targets are built:
+Both required targets are built for each candidate:
 
 - `arm64ec-w64-mingw32` -> `libarm64ecfex.dll`
 - `aarch64-w64-mingw32` -> `libwow64fex.dll`
 
-Common CMake policy:
-
-- `CMAKE_BUILD_TYPE=Release`
-- `ENABLE_ASSERTIONS=False`
-- `BUILD_TESTING=False`
-- `ENABLE_JEMALLOC_GLIBC_ALLOC=False`
-- `TUNE_ARCH=generic`
-- `TUNE_CPU=generic`
-- `OVERRIDE_VERSION=2609-GameNative`
-
-The workflow must never use `-march=native`, `-mcpu=native`, or runner-specific CPU tuning.
+The workflow never uses `-march=native` or `-mcpu=native`.
 
 ## WCP layout
 
-Each package contains:
+Each package contains only:
 
 ```text
 profile.json
@@ -68,41 +76,37 @@ system32/
   libwow64fex.dll
 ```
 
-The archive format is `tar.xz` with the `.wcp` extension, matching the component format GameNative-compatible WCP packages already use.
+The archive is tar.xz with a `.wcp` extension. `profile.json` declares type `FEXCore`, provides a distinct candidate version name, and maps both DLLs into `${system32}`.
 
-`profile.json` declares type `FEXCore` and installs both DLLs into `${system32}`. Candidate identity is encoded in the version/description so test devices can distinguish O3 from O3+LTO packages.
+## Verification gates
 
-## Verification
+Before publication, CI verifies:
 
-Before a candidate is published, CI must verify:
-
-- the checked-out commit exactly matches the pinned FEX-2609 commit
-- both expected DLLs exist for each candidate
-- each DLL is a PE/COFF ARM64-family binary according to LLVM tooling
-- neither package accidentally contains build directories or unrelated artifacts
-- `profile.json` is valid JSON and references files that exist in the package
-- the `.wcp` can be unpacked successfully
-- SHA-256 hashes are generated for every `.wcp`
-
-The release job runs only after both candidate builds and package verification succeed.
+- the source checkout is exactly `395b132f346b1a45def246d10c52245edba1ef02`
+- the pinned llvm-mingw archive checksum
+- packaging contract tests and builder guard tests
+- mobile-tune CMake cache contains the exact `-mtune=cortex-a76` release flags
+- both ARM64EC and AArch64/WoW64 builds complete
+- expected DLLs exist and are non-empty
+- PE machine types match the intended targets
+- WCPs unpack successfully
+- `profile.json` is valid and contains exactly the two expected mappings
+- each WCP contains exactly three files
+- per-candidate SHA-256 checks pass after artifact transfer
+- the release contains exactly both WCP candidates plus combined `SHA256SUMS`
 
 ## Release policy
 
-The workflow is manually dispatchable and may also run automatically on changes to its own branch for validation. Publishing is explicit and creates a prerelease rather than a stable release.
+The workflow publishes prereleases only after both matrix candidates pass all build and package verification gates.
 
-Release naming:
-
-- tag: `fexcore-2609-gamenative-<short-sha>-pre`
-- title: `FEXCore 2609 GameNative optimized test builds`
-
-Release assets:
+Assets:
 
 - `FEXCore-2609-GameNative-O3.wcp`
-- `FEXCore-2609-GameNative-O3-LTO.wcp`
+- `FEXCore-2609-GameNative-O3-MobileTune.wcp`
 - `SHA256SUMS`
 
-Release notes identify the exact FEX commit, pinned toolchain, optimization difference between candidates, and warn that these are testing builds.
+The initial verified release is tagged `fexcore-2609-gamenative-395b132-pre.8`.
 
 ## Testing intent
 
-The two packages are deliberately identical except for LTO. This makes on-device A/B results attributable to LTO rather than a bundle of unrelated compiler changes. Testing should compare game startup, shader/JIT-heavy transitions, CPU-heavy scenes, frametime consistency, compatibility, and crash behavior before any additional tuning is introduced.
+Use the O3 package as the control and MobileTune as the experiment. Compare startup, JIT-heavy transitions, CPU-heavy scenes, average FPS, 1%/0.1% lows, frametime variance, thermal behavior, compatibility, and crashes. The MobileTune candidate should only replace the control if real on-device measurements show a repeatable benefit without regressions.
