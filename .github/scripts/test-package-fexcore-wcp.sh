@@ -40,6 +40,6 @@ run_case() {
 }
 
 run_case o3 FEXCore-2609-GameNative-O3.wcp 2609-GameNative-O3 2609001
-run_case o3-lto FEXCore-2609-GameNative-O3-LTO.wcp 2609-GameNative-O3-LTO 2609002
+run_case o3-mobile FEXCore-2609-GameNative-O3-MobileTune.wcp 2609-GameNative-O3-MobileTune 2609002
 
 echo "WCP packaging tests passed"
