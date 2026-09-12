@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [o3, o3-lto]
+        variant: [o3, o3-mobile]
 
     steps:
       - name: Checkout pipeline branch
@@ -80,7 +80,7 @@ jobs:
         run: |
           case "${{ matrix.variant }}" in
             o3) suffix=1 ;;
-            o3-lto) suffix=2 ;;
+            o3-mobile) suffix=2 ;;
             *) exit 2 ;;
           esac
           version_code=$((260900000 + GITHUB_RUN_NUMBER * 10 + suffix))
@@ -139,13 +139,13 @@ jobs:
         run: |
           cd artifacts
           test -f FEXCore-2609-GameNative-O3.wcp
-          test -f FEXCore-2609-GameNative-O3-LTO.wcp
+          test -f FEXCore-2609-GameNative-O3-MobileTune.wcp
           test "$(find . -maxdepth 1 -type f -name '*.wcp' | wc -l)" -eq 2
           sha256sum -c FEXCore-2609-GameNative-O3.wcp.sha256
-          sha256sum -c FEXCore-2609-GameNative-O3-LTO.wcp.sha256
+          sha256sum -c FEXCore-2609-GameNative-O3-MobileTune.wcp.sha256
           sha256sum \
             FEXCore-2609-GameNative-O3.wcp \
-            FEXCore-2609-GameNative-O3-LTO.wcp \
+            FEXCore-2609-GameNative-O3-MobileTune.wcp \
             > SHA256SUMS
           cat SHA256SUMS
 
@@ -166,15 +166,17 @@ jobs:
           body: |
             GameNative testing builds of **FEXCore 2609** from the exact upstream release commit `${{ env.FEX_SOURCE_SHA }}`.
 
-            Both packages use the same source, `Release`/O3 configuration, generic ARM64 tuning, assertions off, tests off, and pinned `bylaws/llvm-mingw` `${{ env.LLVM_MINGW_TAG }}`. The only compiler optimization difference between the candidates is FEX's `ENABLE_LTO` setting:
+            Both packages use the same source, `Release`/O3 configuration, conservative `armv8-a+crc` ISA baseline, assertions off, tests off, and pinned `bylaws/llvm-mingw` `${{ env.LLVM_MINGW_TAG }}`.
 
-            - `FEXCore-2609-GameNative-O3.wcp` — LTO disabled; controlled baseline.
-            - `FEXCore-2609-GameNative-O3-LTO.wcp` — LTO enabled; primary optimized candidate.
+            - `FEXCore-2609-GameNative-O3.wcp` — generic O3 control (`TUNE_CPU=generic`).
+            - `FEXCore-2609-GameNative-O3-MobileTune.wcp` — O3 with the same ISA baseline but scheduling tuned using `-mtune=cortex-a76`; `TUNE_CPU=none` prevents FEX from also injecting an `-mcpu` target.
 
-            These are **prerelease testing builds**, not stable replacements. PGO is intentionally not claimed or enabled because no representative GameNative workload profile is baked into these binaries yet.
+            The mobile-tuned candidate does **not** require additional ARM ISA extensions compared with the control. It is an experimental scheduling optimization and should be benchmarked against the control on each device.
+
+            LTO was tested and intentionally excluded: current LLVM ARM64EC LTO fails during final linking with unresolved EC-side runtime symbols (see llvm/llvm-project#168469 and ARM64EC tracking issue #179532). PGO is also intentionally not claimed because no representative GameNative workload profile is baked into these binaries yet.
           files: |
             artifacts/FEXCore-2609-GameNative-O3.wcp
-            artifacts/FEXCore-2609-GameNative-O3-LTO.wcp
+            artifacts/FEXCore-2609-GameNative-O3-MobileTune.wcp
             artifacts/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
