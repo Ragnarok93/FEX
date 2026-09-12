@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -ne 5 ]]; then
-  echo "Usage: $0 <o3|o3-mobile> <arm64ec-dll> <wow64-dll> <output-dir> <version-code>" >&2
+  echo "Usage: $0 <o3|o3-mobile|o3-mobile-cache-config|o3-mobile-cache-1g> <arm64ec-dll> <wow64-dll> <output-dir> <version-code>" >&2
   exit 2
 fi
 
@@ -22,6 +22,16 @@ case "$variant" in
     filename="FEXCore-2609-GameNative-O3-MobileTune.wcp"
     version_name="2609-GameNative-O3-MobileTune"
     description="FEXCore 2609 GameNative O3 mobile scheduling test build"
+    ;;
+  o3-mobile-cache-config)
+    filename="FEXCore-2609-GameNative-O3-MobileTune-CacheConfig.wcp"
+    version_name="2609-GameNative-O3-MobileTune-CacheConfig"
+    description="FEXCore 2609 GameNative mobile tune with configurable bounded disk cache"
+    ;;
+  o3-mobile-cache-1g)
+    filename="FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp"
+    version_name="2609-GameNative-O3-MobileTune-Cache1GB"
+    description="FEXCore 2609 GameNative mobile tune with disk cache enabled and 1 GiB default limit"
     ;;
   *)
     echo "Unsupported variant: $variant" >&2
