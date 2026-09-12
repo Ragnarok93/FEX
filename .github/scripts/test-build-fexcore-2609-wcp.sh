@@ -28,4 +28,13 @@ for variant in o3 o3-mobile o3-mobile-cache-config o3-mobile-cache-1g; do
   grep -q 'Source SHA mismatch' "$tmp/${variant}.err"
 done
 
+# Preserve the previous A76 candidate as a control, but require the bounded-cache
+# candidates to carry the newer A77 scheduling-only tune.
+o3_mobile_block="$(sed -n '/^  o3-mobile)$/,/^    ;;/p' "$builder")"
+cache_config_block="$(sed -n '/^  o3-mobile-cache-config)$/,/^    ;;/p' "$builder")"
+cache_1g_block="$(sed -n '/^  o3-mobile-cache-1g)$/,/^    ;;/p' "$builder")"
+grep -Fq -- '-mtune=cortex-a76' <<<"$o3_mobile_block"
+grep -Fq -- '-mtune=cortex-a77' <<<"$cache_config_block"
+grep -Fq -- '-mtune=cortex-a77' <<<"$cache_1g_block"
+
 echo "FEX 2609 builder guard tests passed"
