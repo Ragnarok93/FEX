@@ -32,7 +32,7 @@ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 packager="$repo_root/Scripts/GameNative/package_fexcore_wcp.sh"
-[[ -x "$packager" ]] || { echo "Packager is not executable: $packager" >&2; exit 2; }
+[[ -f "$packager" ]] || { echo "Packager not found: $packager" >&2; exit 2; }
 
 LLVM_MINGW_ROOT="${LLVM_MINGW_ROOT:-/opt/llvm-mingw}"
 for tool in clang cmake ninja llvm-strip llvm-readobj; do
@@ -94,7 +94,7 @@ if grep -q 'ARM64EC' <<<"$wow_headers"; then
   exit 1
 fi
 
-"$packager" "$variant" \
+bash "$packager" "$variant" \
   "$staged/libarm64ecfex.dll" \
   "$staged/libwow64fex.dll" \
   "$output_dir" \
