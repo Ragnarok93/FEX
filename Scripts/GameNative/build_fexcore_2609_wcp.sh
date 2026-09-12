@@ -4,7 +4,7 @@ set -euo pipefail
 EXPECTED_SOURCE_SHA="395b132f346b1a45def246d10c52245edba1ef02"
 
 if [[ $# -ne 4 ]]; then
-  echo "Usage: $0 <source-dir> <o3|o3-mobile> <output-dir> <version-code>" >&2
+  echo "Usage: $0 <source-dir> <o3|o3-mobile|o3-mobile-cache-config|o3-mobile-cache-1g> <output-dir> <version-code>" >&2
   exit 2
 fi
 
@@ -14,6 +14,9 @@ output_dir="$3"
 version_code="$4"
 
 variant_cmake_args=()
+apply_cache_patch=false
+disk_cache_default=""
+disk_cache_max_mb_default=""
 case "$variant" in
   o3)
     tune_cpu=generic
@@ -23,6 +26,30 @@ case "$variant" in
     variant_cmake_args+=(
       '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
       '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+    )
+    ;;
+  o3-mobile-cache-config)
+    tune_cpu=none
+    apply_cache_patch=true
+    disk_cache_default=false
+    disk_cache_max_mb_default=0
+    variant_cmake_args+=(
+      '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+      '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+      '-DFEX_DISKCACHE_DEFAULT=false'
+      '-DFEX_DISKCACHE_MAX_SIZE_MB_DEFAULT=0'
+    )
+    ;;
+  o3-mobile-cache-1g)
+    tune_cpu=none
+    apply_cache_patch=true
+    disk_cache_default=true
+    disk_cache_max_mb_default=1024
+    variant_cmake_args+=(
+      '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+      '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+      '-DFEX_DISKCACHE_DEFAULT=true'
+      '-DFEX_DISKCACHE_MAX_SIZE_MB_DEFAULT=1024'
     )
     ;;
   *)
@@ -41,7 +68,9 @@ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 packager="$repo_root/Scripts/GameNative/package_fexcore_wcp.sh"
+patcher="$repo_root/Scripts/GameNative/apply_fexcore_2609_disk_cache_cap.py"
 [[ -f "$packager" ]] || { echo "Packager not found: $packager" >&2; exit 2; }
+[[ -f "$patcher" ]] || { echo "Disk-cache patcher not found: $patcher" >&2; exit 2; }
 
 LLVM_MINGW_ROOT="${LLVM_MINGW_ROOT:-/opt/llvm-mingw}"
 for tool in clang cmake ninja llvm-strip llvm-readobj; do
@@ -51,11 +80,39 @@ for tool in clang cmake ninja llvm-strip llvm-readobj; do
     [[ -x "$LLVM_MINGW_ROOT/bin/$tool" ]] || { echo "Required tool missing: $LLVM_MINGW_ROOT/bin/$tool" >&2; exit 2; }
   fi
 done
+command -v python3 >/dev/null || { echo "Required tool missing: python3" >&2; exit 2; }
+command -v c++ >/dev/null || { echo "Required tool missing: c++" >&2; exit 2; }
 
 mkdir -p "$output_dir"
 build_root="$(mktemp -d "${RUNNER_TEMP:-/tmp}/fex-2609-${variant}.XXXXXX")"
 trap 'rm -rf "$build_root"' EXIT
 BUILT_DLL=""
+
+if [[ "$apply_cache_patch" == true ]]; then
+  python3 "$patcher" "$source_dir"
+  git -C "$source_dir" diff --check
+  test -f "$source_dir/FEXCore/include/FEXCore/Core/DiskCacheCapacity.h"
+
+  cat > "$build_root/disk-cache-capacity-test.cpp" <<'EOF'
+#include <cstdint>
+#include <limits>
+#include <FEXCore/Core/DiskCacheCapacity.h>
+
+using FEXCore::DiskCache::CanStoreWithinCapacity;
+
+static_assert(CanStoreWithinCapacity(0, UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX));
+static_assert(CanStoreWithinCapacity(1024, 256, 256, 256, 256));
+static_assert(!CanStoreWithinCapacity(1024, 256, 256, 256, 257));
+static_assert(!CanStoreWithinCapacity(1024, 1025, 0, 0, 0));
+static_assert(!CanStoreWithinCapacity(UINT64_MAX, UINT64_MAX, 0, 1, 0));
+static_assert(!CanStoreWithinCapacity(UINT64_MAX, UINT64_MAX - 1, 0, 1, 1));
+
+int main() { return 0; }
+EOF
+  c++ -std=c++20 -Wall -Wextra -Werror -I"$source_dir/FEXCore/include" \
+    "$build_root/disk-cache-capacity-test.cpp" -o "$build_root/disk-cache-capacity-test"
+  "$build_root/disk-cache-capacity-test"
+fi
 
 build_arch() {
   local triple="$1"
@@ -79,12 +136,35 @@ build_arch() {
     -DOVERRIDE_HASH="$EXPECTED_SOURCE_SHA" \
     "${variant_cmake_args[@]}"
 
-  if [[ "$variant" == o3-mobile ]]; then
+  if [[ "$tune_cpu" == none ]]; then
     grep -Fq 'CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=cortex-a76' "$build_dir/CMakeCache.txt"
     grep -Fq 'CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=cortex-a76' "$build_dir/CMakeCache.txt"
   fi
 
+  if [[ "$apply_cache_patch" == true ]]; then
+    grep -Fq "FEX_DISKCACHE_DEFAULT:STRING=$disk_cache_default" "$build_dir/CMakeCache.txt"
+    grep -Fq "FEX_DISKCACHE_MAX_SIZE_MB_DEFAULT:STRING=$disk_cache_max_mb_default" "$build_dir/CMakeCache.txt"
+    python3 - "$build_dir/generated/Config/Config.json" "$disk_cache_default" "$disk_cache_max_mb_default" <<'PY'
+import json
+import sys
+
+path, expected_enabled, expected_max = sys.argv[1:]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+cpu = data["Options"]["CPU"]
+assert cpu["DiskCache"]["Default"] == expected_enabled
+assert cpu["DiskCacheMaxSizeMB"]["Default"] == expected_max
+assert cpu["DiskCacheMaxSizeMB"]["Type"] == "uint32"
+assert cpu["DiskCacheMaxSizeMB"]["AffectsCodeGen"] == "false"
+PY
+  fi
+
   cmake --build "$build_dir" --parallel 2
+
+  if [[ "$apply_cache_patch" == true ]]; then
+    grep -Fq 'DISKCACHEMAXSIZEMB' "$build_dir/include/FEXCore/Config/ConfigValues.inl"
+    grep -Fq 'FEX_DISKCACHEMAXSIZEMB' "$build_dir/generated/FEX.1"
+  fi
 
   local dll="$build_dir/Bin/$expected_dll"
   [[ -s "$dll" ]] || { echo "Expected DLL missing or empty: $dll" >&2; exit 1; }
