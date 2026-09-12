@@ -14,13 +14,13 @@ printf 'fixture\n' > "$tmp/source/README"
 git -C "$tmp/source" add README
 git -C "$tmp/source" commit -qm fixture
 
-if "$builder" "$tmp/source" invalid "$tmp/out" 1 >"$tmp/invalid.out" 2>"$tmp/invalid.err"; then
+if bash "$builder" "$tmp/source" invalid "$tmp/out" 1 >"$tmp/invalid.out" 2>"$tmp/invalid.err"; then
   echo "expected invalid variant to fail" >&2
   exit 1
 fi
 grep -q 'Unsupported variant: invalid' "$tmp/invalid.err"
 
-if "$builder" "$tmp/source" o3 "$tmp/out" 1 >"$tmp/sha.out" 2>"$tmp/sha.err"; then
+if bash "$builder" "$tmp/source" o3 "$tmp/out" 1 >"$tmp/sha.out" 2>"$tmp/sha.err"; then
   echo "expected source SHA mismatch to fail" >&2
   exit 1
 fi
