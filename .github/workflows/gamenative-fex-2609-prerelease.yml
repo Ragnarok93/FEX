@@ -1,0 +1,198 @@
+name: GameNative FEXCore 2609 optimized prerelease
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - gamenative/fex-2609-optimized
+    paths:
+      - '.github/workflows/gamenative-fex-2609-prerelease.yml'
+      - '.github/scripts/test-package-fexcore-wcp.sh'
+      - '.github/scripts/test-build-fexcore-2609-wcp.sh'
+      - 'Scripts/GameNative/**'
+
+permissions:
+  contents: write
+
+env:
+  FEX_SOURCE_SHA: 395b132f346b1a45def246d10c52245edba1ef02
+  LLVM_MINGW_TAG: '20250920'
+  LLVM_MINGW_SHA256: 8dd8c34fc051a50c2fae86015f35057f8aae93fe1e19b34537ef1269a8b4c772
+  LLVM_MINGW_ROOT: /opt/llvm-mingw
+  GLSLANG_VERSION: 16.6.0
+  GLSLANG_SHA256: a3fc4f083b1793eb53e55fa3577ac9649ffbe0340715e30d116290fb5382393f
+
+jobs:
+  build:
+    name: Build ${{ matrix.variant }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [o3, o3-lto]
+
+    steps:
+      - name: Checkout pipeline branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl dos2unix file git jq \
+            meson ninja-build perl pkg-config python3 tar unzip wget xz-utils zstd
+
+      - name: Run helper contract tests
+        run: |
+          bash .github/scripts/test-package-fexcore-wcp.sh
+          bash .github/scripts/test-build-fexcore-2609-wcp.sh
+          bash -n Scripts/GameNative/package_fexcore_wcp.sh
+          bash -n Scripts/GameNative/build_fexcore_2609_wcp.sh
+
+      - name: Install pinned glslang
+        run: |
+          archive="$RUNNER_TEMP/glslang-${GLSLANG_VERSION}.zip"
+          root="$RUNNER_TEMP/glslang"
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://github.com/KhronosGroup/glslang/releases/download/${GLSLANG_VERSION}/glslang-${GLSLANG_VERSION}-linux-x86_64-release.zip" \
+            -o "$archive"
+          echo "${GLSLANG_SHA256}  ${archive}" | sha256sum -c -
+          rm -rf "$root"
+          mkdir -p "$root"
+          unzip -q "$archive" -d "$root"
+          validator="$(find "$root" -type f -name glslangValidator -print -quit)"
+          test -n "$validator"
+          chmod +x "$validator"
+          echo "$(dirname "$validator")" >> "$GITHUB_PATH"
+
+      - name: Install pinned llvm-mingw
+        run: |
+          archive="$RUNNER_TEMP/llvm-mingw-${LLVM_MINGW_TAG}.tar.xz"
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://github.com/bylaws/llvm-mingw/releases/download/${LLVM_MINGW_TAG}/llvm-mingw-${LLVM_MINGW_TAG}-ucrt-ubuntu-22.04-x86_64.tar.xz" \
+            -o "$archive"
+          echo "${LLVM_MINGW_SHA256}  ${archive}" | sha256sum -c -
+          sudo rm -rf "$LLVM_MINGW_ROOT"
+          sudo mkdir -p "$LLVM_MINGW_ROOT"
+          sudo tar -C "$LLVM_MINGW_ROOT" --strip-components=1 -xJf "$archive"
+          echo "$LLVM_MINGW_ROOT/bin" >> "$GITHUB_PATH"
+          "$LLVM_MINGW_ROOT/bin/clang" --version
+
+      - name: Stage exact FEX-2609 source
+        id: source
+        run: |
+          source_dir="$RUNNER_TEMP/fex-2609-source"
+          git worktree add --detach "$source_dir" "$FEX_SOURCE_SHA"
+          git -C "$source_dir" submodule sync --recursive
+          git -C "$source_dir" submodule update --init --recursive --depth 1
+          actual="$(git -C "$source_dir" rev-parse HEAD)"
+          test "$actual" = "$FEX_SOURCE_SHA"
+          echo "source_dir=$source_dir" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$actual" >> "$GITHUB_OUTPUT"
+
+      - name: Build and package candidate
+        id: package
+        run: |
+          case "${{ matrix.variant }}" in
+            o3) suffix=1 ;;
+            o3-lto) suffix=2 ;;
+            *) exit 2 ;;
+          esac
+          version_code=$((260900000 + GITHUB_RUN_NUMBER * 10 + suffix))
+          output_dir="$RUNNER_TEMP/fex-output"
+          mkdir -p "$output_dir"
+          bash Scripts/GameNative/build_fexcore_2609_wcp.sh \
+            "${{ steps.source.outputs.source_dir }}" \
+            "${{ matrix.variant }}" \
+            "$output_dir" \
+            "$version_code"
+          wcp="$(find "$output_dir" -maxdepth 1 -type f -name '*.wcp' -print -quit)"
+          test -n "$wcp"
+          echo "wcp=$wcp" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Verify WCP
+        run: |
+          wcp="${{ steps.package.outputs.wcp }}"
+          extract="$RUNNER_TEMP/verify-${{ matrix.variant }}"
+          mkdir -p "$extract"
+          tar -tJf "$wcp"
+          tar -xJf "$wcp" -C "$extract"
+          jq -e '.type == "FEXCore" and (.files | length == 2)' "$extract/profile.json" >/dev/null
+          test -s "$extract/system32/libarm64ecfex.dll"
+          test -s "$extract/system32/libwow64fex.dll"
+          test "$(find "$extract" -type f | wc -l)" -eq 3
+          output_dir="${{ steps.package.outputs.output_dir }}"
+          base="$(basename "$wcp")"
+          (cd "$output_dir" && sha256sum "$base" > "$base.sha256")
+          cat "$output_dir/$base.sha256"
+
+      - name: Upload candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: fexcore-${{ matrix.variant }}
+          path: |
+            ${{ steps.package.outputs.output_dir }}/*.wcp
+            ${{ steps.package.outputs.output_dir }}/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  release:
+    name: Publish prerelease
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download candidates
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Verify release set and generate combined checksums
+        run: |
+          cd artifacts
+          test -f FEXCore-2609-GameNative-O3.wcp
+          test -f FEXCore-2609-GameNative-O3-LTO.wcp
+          test "$(find . -maxdepth 1 -type f -name '*.wcp' | wc -l)" -eq 2
+          sha256sum -c FEXCore-2609-GameNative-O3.wcp.sha256
+          sha256sum -c FEXCore-2609-GameNative-O3-LTO.wcp.sha256
+          sha256sum \
+            FEXCore-2609-GameNative-O3.wcp \
+            FEXCore-2609-GameNative-O3-LTO.wcp \
+            > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Set prerelease metadata
+        run: |
+          short="${FEX_SOURCE_SHA:0:7}"
+          echo "RELEASE_TAG=fexcore-2609-gamenative-${short}-pre.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=FEXCore 2609 GameNative optimized test builds (pre.${GITHUB_RUN_NUMBER})" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          make_latest: false
+          body: |
+            GameNative testing builds of **FEXCore 2609** from the exact upstream release commit `${{ env.FEX_SOURCE_SHA }}`.
+
+            Both packages use the same source, `Release`/O3 configuration, generic ARM64 tuning, assertions off, tests off, and pinned `bylaws/llvm-mingw` `${{ env.LLVM_MINGW_TAG }}`. The only compiler optimization difference between the candidates is FEX's `ENABLE_LTO` setting:
+
+            - `FEXCore-2609-GameNative-O3.wcp` — LTO disabled; controlled baseline.
+            - `FEXCore-2609-GameNative-O3-LTO.wcp` — LTO enabled; primary optimized candidate.
+
+            These are **prerelease testing builds**, not stable replacements. PGO is intentionally not claimed or enabled because no representative GameNative workload profile is baked into these binaries yet.
+          files: |
+            artifacts/FEXCore-2609-GameNative-O3.wcp
+            artifacts/FEXCore-2609-GameNative-O3-LTO.wcp
+            artifacts/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
