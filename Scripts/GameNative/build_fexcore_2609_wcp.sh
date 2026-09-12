@@ -46,6 +46,7 @@ done
 mkdir -p "$output_dir"
 build_root="$(mktemp -d "${RUNNER_TEMP:-/tmp}/fex-2609-${variant}.XXXXXX")"
 trap 'rm -rf "$build_root"' EXIT
+BUILT_DLL=""
 
 build_arch() {
   local triple="$1"
@@ -72,11 +73,13 @@ build_arch() {
 
   local dll="$build_dir/Bin/$expected_dll"
   [[ -s "$dll" ]] || { echo "Expected DLL missing or empty: $dll" >&2; exit 1; }
-  printf '%s\n' "$dll"
+  BUILT_DLL="$dll"
 }
 
-ec_source="$(build_arch arm64ec libarm64ecfex.dll | tail -n 1)"
-wow_source="$(build_arch aarch64 libwow64fex.dll | tail -n 1)"
+build_arch arm64ec libarm64ecfex.dll
+ec_source="$BUILT_DLL"
+build_arch aarch64 libwow64fex.dll
+wow_source="$BUILT_DLL"
 
 staged="$build_root/staged"
 mkdir -p "$staged"
