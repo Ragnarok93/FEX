@@ -17,7 +17,7 @@ run_case() {
   local version_code="$4"
   local extract="$tmp/extract-$variant"
 
-  "$packager" "$variant" \
+  bash "$packager" "$variant" \
     "$tmp/libarm64ecfex.dll" \
     "$tmp/libwow64fex.dll" \
     "$tmp/out" \
