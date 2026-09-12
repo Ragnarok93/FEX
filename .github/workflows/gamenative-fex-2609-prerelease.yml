@@ -196,3 +196,5 @@ jobs:
             artifacts/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# Actions enabled on fork; trigger prerelease build.
