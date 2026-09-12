@@ -17,37 +17,41 @@ variant_cmake_args=()
 apply_cache_patch=false
 disk_cache_default=""
 disk_cache_max_mb_default=""
+mtune_cpu=""
 case "$variant" in
   o3)
     tune_cpu=generic
     ;;
   o3-mobile)
     tune_cpu=none
+    mtune_cpu=cortex-a76
     variant_cmake_args+=(
-      '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
-      '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+      "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$mtune_cpu"
+      "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$mtune_cpu"
     )
     ;;
   o3-mobile-cache-config)
     tune_cpu=none
+    mtune_cpu=cortex-a77
     apply_cache_patch=true
     disk_cache_default=false
     disk_cache_max_mb_default=0
     variant_cmake_args+=(
-      '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
-      '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+      "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$mtune_cpu"
+      "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$mtune_cpu"
       '-DFEX_DISKCACHE_DEFAULT=false'
       '-DFEX_DISKCACHE_MAX_SIZE_MB_DEFAULT=0'
     )
     ;;
   o3-mobile-cache-1g)
     tune_cpu=none
+    mtune_cpu=cortex-a77
     apply_cache_patch=true
     disk_cache_default=true
     disk_cache_max_mb_default=1024
     variant_cmake_args+=(
-      '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
-      '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+      "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$mtune_cpu"
+      "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$mtune_cpu"
       '-DFEX_DISKCACHE_DEFAULT=true'
       '-DFEX_DISKCACHE_MAX_SIZE_MB_DEFAULT=1024'
     )
@@ -136,9 +140,9 @@ build_arch() {
     -DOVERRIDE_HASH="$EXPECTED_SOURCE_SHA" \
     "${variant_cmake_args[@]}"
 
-  if [[ "$tune_cpu" == none ]]; then
-    grep -Fq 'CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=cortex-a76' "$build_dir/CMakeCache.txt"
-    grep -Fq 'CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=cortex-a76' "$build_dir/CMakeCache.txt"
+  if [[ -n "$mtune_cpu" ]]; then
+    grep -Fq "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=$mtune_cpu" "$build_dir/CMakeCache.txt"
+    grep -Fq "CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=$mtune_cpu" "$build_dir/CMakeCache.txt"
   fi
 
   if [[ "$apply_cache_patch" == true ]]; then
