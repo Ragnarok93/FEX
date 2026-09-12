@@ -1,4 +1,4 @@
-name: GameNative FEXCore 2609 optimized prerelease
+name: GameNative FEXCore 2609 bounded-cache prerelease
 
 on:
   workflow_dispatch:
@@ -9,11 +9,6 @@ on:
       - '.github/workflows/gamenative-fex-2609-prerelease.yml'
       - '.github/scripts/test-package-fexcore-wcp.sh'
       - '.github/scripts/test-build-fexcore-2609-wcp.sh'
-      - 'FEXCore/Source/Interface/Config/Config.json.in'
-      - 'FEXCore/Source/Interface/Core/DiskCache.cpp'
-      - 'FEXCore/include/FEXCore/Core/DiskCache.h'
-      - 'FEXCore/include/FEXCore/Core/DiskCacheCapacity.h'
-      - 'FEXCore/Source/CMakeLists.txt'
       - 'Scripts/GameNative/**'
 
 permissions:
@@ -32,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [o3, o3-mobile]
+        variant: [o3-mobile-cache-config, o3-mobile-cache-1g]
 
     steps:
       - name: Checkout pipeline branch
@@ -54,6 +49,7 @@ jobs:
           bash .github/scripts/test-build-fexcore-2609-wcp.sh
           bash -n Scripts/GameNative/package_fexcore_wcp.sh
           bash -n Scripts/GameNative/build_fexcore_2609_wcp.sh
+          python3 -m py_compile Scripts/GameNative/apply_fexcore_2609_disk_cache_cap.py
 
       - name: Install pinned llvm-mingw
         run: |
@@ -68,7 +64,7 @@ jobs:
           echo "$LLVM_MINGW_ROOT/bin" >> "$GITHUB_PATH"
           "$LLVM_MINGW_ROOT/bin/clang" --version
 
-      - name: Stage exact FEX-2609 source
+      - name: Stage exact upstream FEX-2609 source
         id: source
         run: |
           source_dir="$RUNNER_TEMP/fex-2609-source"
@@ -84,11 +80,11 @@ jobs:
         id: package
         run: |
           case "${{ matrix.variant }}" in
-            o3) suffix=1 ;;
-            o3-mobile) suffix=2 ;;
+            o3-mobile-cache-config) suffix=1 ;;
+            o3-mobile-cache-1g) suffix=2 ;;
             *) exit 2 ;;
           esac
-          version_code=$((260900000 + GITHUB_RUN_NUMBER * 10 + suffix))
+          version_code=$((260910000 + GITHUB_RUN_NUMBER * 10 + suffix))
           output_dir="$RUNNER_TEMP/fex-output"
           mkdir -p "$output_dir"
           bash Scripts/GameNative/build_fexcore_2609_wcp.sh \
@@ -143,22 +139,22 @@ jobs:
       - name: Verify release set and generate combined checksums
         run: |
           cd artifacts
-          test -f FEXCore-2609-GameNative-O3.wcp
-          test -f FEXCore-2609-GameNative-O3-MobileTune.wcp
+          test -f FEXCore-2609-GameNative-O3-MobileTune-CacheConfig.wcp
+          test -f FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp
           test "$(find . -maxdepth 1 -type f -name '*.wcp' | wc -l)" -eq 2
-          sha256sum -c FEXCore-2609-GameNative-O3.wcp.sha256
-          sha256sum -c FEXCore-2609-GameNative-O3-MobileTune.wcp.sha256
+          sha256sum -c FEXCore-2609-GameNative-O3-MobileTune-CacheConfig.wcp.sha256
+          sha256sum -c FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp.sha256
           sha256sum \
-            FEXCore-2609-GameNative-O3.wcp \
-            FEXCore-2609-GameNative-O3-MobileTune.wcp \
+            FEXCore-2609-GameNative-O3-MobileTune-CacheConfig.wcp \
+            FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp \
             > SHA256SUMS
           cat SHA256SUMS
 
       - name: Set prerelease metadata
         run: |
           short="${FEX_SOURCE_SHA:0:7}"
-          echo "RELEASE_TAG=fexcore-2609-gamenative-${short}-pre.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-          echo "RELEASE_NAME=FEXCore 2609 GameNative optimized test builds (pre.${GITHUB_RUN_NUMBER})" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=fexcore-2609-gamenative-cache-${short}-pre.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=FEXCore 2609 GameNative bounded-cache test builds (pre.${GITHUB_RUN_NUMBER})" >> "$GITHUB_ENV"
 
       - name: Publish GitHub prerelease
         uses: softprops/action-gh-release@v2
@@ -169,19 +165,28 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
-            GameNative testing builds of **FEXCore 2609** from the exact upstream release commit `${{ env.FEX_SOURCE_SHA }}`.
+            GameNative testing builds based on exact upstream **FEXCore 2609** commit `${{ env.FEX_SOURCE_SHA }}`, with the bounded disk-cache patch applied reproducibly by pipeline commit `${{ github.sha }}`.
 
-            Both packages use the same source, `Release`/O3 configuration, conservative `armv8-a+crc` ISA baseline, assertions off, tests off, and pinned `bylaws/llvm-mingw` `${{ env.LLVM_MINGW_TAG }}`.
+            Common tuning in both packages:
+            - `Release` / O3 / NDEBUG.
+            - Conservative FEX `TUNE_ARCH=generic` ISA baseline.
+            - `TUNE_CPU=none` plus `-mtune=cortex-a76` scheduling optimization, so no newer ARM ISA extensions are introduced by the mobile tune.
+            - Assertions/tests/ccache off and LTO off. ARM64EC LTO remains excluded because the current LLVM ARM64EC LTO path is broken.
+            - PGO is not claimed because no representative GameNative workload profile is baked into these binaries.
 
-            - `FEXCore-2609-GameNative-O3.wcp` — generic O3 control (`TUNE_CPU=generic`).
-            - `FEXCore-2609-GameNative-O3-MobileTune.wcp` — O3 with the same ISA baseline but scheduling tuned using `-mtune=cortex-a76`; `TUNE_CPU=none` prevents FEX from also injecting an `-mcpu` target.
+            Bounded-cache behavior:
+            - The limit covers the **total writable cache database plus its index**.
+            - Existing entries remain readable at the limit; new entries are simply not admitted.
+            - No live eviction/compaction is attempted in this 2609 patch.
+            - `FEX_DISKCACHEMAXSIZEMB=0` means unlimited, preserving upstream behavior.
+            - Both `FEX_DISKCACHE` and `FEX_DISKCACHEMAXSIZEMB` remain normal FEX runtime configuration/environment controls.
 
-            The mobile-tuned candidate does **not** require additional ARM ISA extensions compared with the control. It is an experimental scheduling optimization and should be benchmarked against the control on each device.
-
-            LTO was tested and intentionally excluded: current LLVM ARM64EC LTO fails during final linking with unresolved EC-side runtime symbols. PGO is also intentionally not claimed because no representative GameNative workload profile is baked into these binaries yet.
+            Candidates:
+            - `FEXCore-2609-GameNative-O3-MobileTune-CacheConfig.wcp` — cache **off** by default and capacity **unlimited (0 MiB)** by default; enable the cache and set any desired capacity at runtime.
+            - `FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp` — cache **on** by default with a **1024 MiB total writable limit**; both defaults remain runtime-overridable.
           files: |
-            artifacts/FEXCore-2609-GameNative-O3.wcp
-            artifacts/FEXCore-2609-GameNative-O3-MobileTune.wcp
+            artifacts/FEXCore-2609-GameNative-O3-MobileTune-CacheConfig.wcp
+            artifacts/FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp
             artifacts/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
