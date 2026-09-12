@@ -20,10 +20,12 @@ if bash "$builder" "$tmp/source" invalid "$tmp/out" 1 >"$tmp/invalid.out" 2>"$tm
 fi
 grep -q 'Unsupported variant: invalid' "$tmp/invalid.err"
 
-if bash "$builder" "$tmp/source" o3 "$tmp/out" 1 >"$tmp/sha.out" 2>"$tmp/sha.err"; then
-  echo "expected source SHA mismatch to fail" >&2
-  exit 1
-fi
-grep -q 'Source SHA mismatch' "$tmp/sha.err"
+for variant in o3 o3-mobile; do
+  if bash "$builder" "$tmp/source" "$variant" "$tmp/out" 1 >"$tmp/${variant}.out" 2>"$tmp/${variant}.err"; then
+    echo "expected source SHA mismatch for $variant" >&2
+    exit 1
+  fi
+  grep -q 'Source SHA mismatch' "$tmp/${variant}.err"
+done
 
 echo "FEX 2609 builder guard tests passed"
