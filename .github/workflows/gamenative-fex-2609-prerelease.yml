@@ -170,20 +170,21 @@ jobs:
             Common tuning in both packages:
             - `Release` / O3 / NDEBUG.
             - Conservative FEX `TUNE_ARCH=generic` ISA baseline.
-            - `TUNE_CPU=none` plus `-mtune=cortex-a76` scheduling optimization, so no newer ARM ISA extensions are introduced by the mobile tune.
+            - `TUNE_CPU=none` plus `-mtune=cortex-a77` scheduling optimization, selected as a closer scheduling match for Snapdragon 865-class Cortex-A77 performance cores while introducing no newer ARM ISA extensions.
             - Assertions/tests/ccache off and LTO off. ARM64EC LTO remains excluded because the current LLVM ARM64EC LTO path is broken.
             - PGO is not claimed because no representative GameNative workload profile is baked into these binaries.
 
             Bounded-cache behavior:
-            - The limit covers the **total writable cache database plus its index**.
+            - The limit covers the **active writable cache database plus its index**.
             - Existing entries remain readable at the limit; new entries are simply not admitted.
             - No live eviction/compaction is attempted in this 2609 patch.
             - `FEX_DISKCACHEMAXSIZEMB=0` means unlimited, preserving upstream behavior.
             - Both `FEX_DISKCACHE` and `FEX_DISKCACHEMAXSIZEMB` remain normal FEX runtime configuration/environment controls.
+            - Historical cache-key bucket directories are not automatically purged or included in a single cross-bucket global budget.
 
             Candidates:
             - `FEXCore-2609-GameNative-O3-MobileTune-CacheConfig.wcp` — cache **off** by default and capacity **unlimited (0 MiB)** by default; enable the cache and set any desired capacity at runtime.
-            - `FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp` — cache **on** by default with a **1024 MiB total writable limit**; both defaults remain runtime-overridable.
+            - `FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp` — cache **on** by default with a **1024 MiB active writable-bucket limit**; both defaults remain runtime-overridable.
           files: |
             artifacts/FEXCore-2609-GameNative-O3-MobileTune-CacheConfig.wcp
             artifacts/FEXCore-2609-GameNative-O3-MobileTune-Cache1GB.wcp
