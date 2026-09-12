@@ -4,7 +4,7 @@ set -euo pipefail
 EXPECTED_SOURCE_SHA="395b132f346b1a45def246d10c52245edba1ef02"
 
 if [[ $# -ne 4 ]]; then
-  echo "Usage: $0 <source-dir> <o3|o3-lto> <output-dir> <version-code>" >&2
+  echo "Usage: $0 <source-dir> <o3|o3-mobile> <output-dir> <version-code>" >&2
   exit 2
 fi
 
@@ -13,9 +13,18 @@ variant="$2"
 output_dir="$3"
 version_code="$4"
 
+variant_cmake_args=()
 case "$variant" in
-  o3) enable_lto=False ;;
-  o3-lto) enable_lto=True ;;
+  o3)
+    tune_cpu=generic
+    ;;
+  o3-mobile)
+    tune_cpu=none
+    variant_cmake_args+=(
+      '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+      '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a76'
+    )
+    ;;
   *)
     echo "Unsupported variant: $variant" >&2
     exit 2
@@ -60,14 +69,20 @@ build_arch() {
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_INSTALL_LIBDIR=/usr/lib/wine/aarch64-windows \
     -DENABLE_JEMALLOC_GLIBC_ALLOC=False \
-    -DENABLE_LTO="$enable_lto" \
+    -DENABLE_LTO=False \
     -DENABLE_ASSERTIONS=False \
     -DENABLE_CCACHE=False \
     -DBUILD_TESTING=False \
     -DTUNE_ARCH=generic \
-    -DTUNE_CPU=generic \
+    -DTUNE_CPU="$tune_cpu" \
     -DOVERRIDE_VERSION=2609 \
-    -DOVERRIDE_HASH="$EXPECTED_SOURCE_SHA"
+    -DOVERRIDE_HASH="$EXPECTED_SOURCE_SHA" \
+    "${variant_cmake_args[@]}"
+
+  if [[ "$variant" == o3-mobile ]]; then
+    grep -Fq 'CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=cortex-a76' "$build_dir/CMakeCache.txt"
+    grep -Fq 'CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=cortex-a76' "$build_dir/CMakeCache.txt"
+  fi
 
   cmake --build "$build_dir" --parallel 2
 
