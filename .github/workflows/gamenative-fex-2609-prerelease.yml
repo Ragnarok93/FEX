@@ -4,11 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - gamenative/fex-2609-optimized
+      - gamenative/fex-2609-cache-tuning
     paths:
       - '.github/workflows/gamenative-fex-2609-prerelease.yml'
       - '.github/scripts/test-package-fexcore-wcp.sh'
       - '.github/scripts/test-build-fexcore-2609-wcp.sh'
+      - 'FEXCore/Source/Interface/Config/Config.json.in'
+      - 'FEXCore/Source/Interface/Core/DiskCache.cpp'
+      - 'FEXCore/include/FEXCore/Core/DiskCache.h'
+      - 'FEXCore/include/FEXCore/Core/DiskCacheCapacity.h'
+      - 'FEXCore/Source/CMakeLists.txt'
       - 'Scripts/GameNative/**'
 
 permissions:
@@ -173,7 +178,7 @@ jobs:
 
             The mobile-tuned candidate does **not** require additional ARM ISA extensions compared with the control. It is an experimental scheduling optimization and should be benchmarked against the control on each device.
 
-            LTO was tested and intentionally excluded: current LLVM ARM64EC LTO fails during final linking with unresolved EC-side runtime symbols (see llvm/llvm-project#168469 and ARM64EC tracking issue #179532). PGO is also intentionally not claimed because no representative GameNative workload profile is baked into these binaries yet.
+            LTO was tested and intentionally excluded: current LLVM ARM64EC LTO fails during final linking with unresolved EC-side runtime symbols. PGO is also intentionally not claimed because no representative GameNative workload profile is baked into these binaries yet.
           files: |
             artifacts/FEXCore-2609-GameNative-O3.wcp
             artifacts/FEXCore-2609-GameNative-O3-MobileTune.wcp

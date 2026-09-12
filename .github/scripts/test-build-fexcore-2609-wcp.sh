@@ -20,7 +20,7 @@ if bash "$builder" "$tmp/source" invalid "$tmp/out" 1 >"$tmp/invalid.out" 2>"$tm
 fi
 grep -q 'Unsupported variant: invalid' "$tmp/invalid.err"
 
-for variant in o3 o3-mobile; do
+for variant in o3 o3-mobile o3-mobile-cache-config o3-mobile-cache-1g; do
   if bash "$builder" "$tmp/source" "$variant" "$tmp/out" 1 >"$tmp/${variant}.out" 2>"$tmp/${variant}.err"; then
     echo "expected source SHA mismatch for $variant" >&2
     exit 1
