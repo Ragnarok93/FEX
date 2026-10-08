@@ -4,7 +4,7 @@ set -euo pipefail
 EXPECTED_SOURCE_SHA="14c92681f4d62cf84d901460e0358de09c8847a7"
 
 if [[ $# -ne 4 ]]; then
-  echo "Usage: $0 <source-dir> <o3|o3-mobile> <output-dir> <version-code>" >&2
+  echo "Usage: $0 <source-dir> <o3|o3-mobile|o3-exynos2400|o3-snapdragon865> <output-dir> <version-code>" >&2
   exit 2
 fi
 
@@ -14,22 +14,39 @@ output_dir="$3"
 version_code="$4"
 
 variant_cmake_args=()
+tune_target=""
 case "$variant" in
   o3)
     tune_cpu=generic
     ;;
   o3-mobile)
     tune_cpu=none
-    variant_cmake_args+=(
-      '-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a77'
-      '-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=cortex-a77'
-    )
+    tune_target=cortex-a77
+    ;;
+  o3-exynos2400)
+    tune_cpu=none
+    # Five Cortex-A720 performance cores plus a Cortex-X4 prime and four A520 efficiency cores.
+    # Tune instruction scheduling only: preserve FEX's baseline ARMv8-A+CRC ISA.
+    tune_target=cortex-a720
+    ;;
+  o3-snapdragon865)
+    tune_cpu=none
+    # Snapdragon 865 Kryo 585 performance cores are derived from Cortex-A77.
+    # This deliberately shares the A77 scheduling baseline with the general mobile build.
+    tune_target=cortex-a77
     ;;
   *)
     echo "Unsupported variant: $variant" >&2
     exit 2
     ;;
 esac
+
+if [[ -n "$tune_target" ]]; then
+  variant_cmake_args+=(
+    "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$tune_target"
+    "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$tune_target"
+  )
+fi
 
 [[ -d "$source_dir/.git" || -f "$source_dir/.git" ]] || { echo "Source directory is not a git checkout: $source_dir" >&2; exit 2; }
 actual_source_sha="$(git -C "$source_dir" rev-parse HEAD)"
@@ -79,9 +96,9 @@ build_arch() {
     -DOVERRIDE_HASH="$EXPECTED_SOURCE_SHA" \
     "${variant_cmake_args[@]}"
 
-  if [[ "$variant" == o3-mobile ]]; then
-    grep -Fq 'CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=cortex-a77' "$build_dir/CMakeCache.txt"
-    grep -Fq 'CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=cortex-a77' "$build_dir/CMakeCache.txt"
+  if [[ -n "$tune_target" ]]; then
+    grep -Fq "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=$tune_target" "$build_dir/CMakeCache.txt"
+    grep -Fq "CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=$tune_target" "$build_dir/CMakeCache.txt"
   fi
 
   cmake --build "$build_dir" --parallel 2
