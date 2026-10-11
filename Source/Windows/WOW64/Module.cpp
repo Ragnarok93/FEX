@@ -52,6 +52,8 @@ $end_info$
 #include "Windows/Common/SHMStats.h"
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <type_traits>
 #include <atomic>
 #include <mutex>
@@ -600,6 +602,12 @@ void BTCpuProcessInit() {
   if (StartupSleep() && (StartupSleepProcName().empty() || ExecutableName == StartupSleepProcName())) {
     LogMan::Msg::IFmt("[{}][{}] Sleeping for {} seconds", GetCurrentProcessId(), ExecutableName, StartupSleep());
     std::this_thread::sleep_for(std::chrono::seconds(StartupSleep()));
+  }
+
+  // Diagnostic only: one startup marker, never inside translated execution.
+  if (const char* phase0 = std::getenv("FEX_FF7R_PHASE0"); phase0 && std::strcmp(phase0, "1") == 0) {
+    LogMan::Msg::IFmt("FEX-FF7R-PHASE0: backend=WoW64 app={} pid={} wine={}",
+                     ExecutableName, GetCurrentProcessId(), IsWine ? 1 : 0);
   }
 }
 
