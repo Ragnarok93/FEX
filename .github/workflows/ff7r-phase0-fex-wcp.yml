@@ -1,0 +1,151 @@
+name: FF7R Phase-0 FEX 2610 SD865 diagnostic WCP
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ff7r-sd865-architecture-20261011
+    paths:
+      - '.github/workflows/ff7r-phase0-fex-wcp.yml'
+      - 'Source/Windows/ARM64EC/Module.cpp'
+      - 'Source/Windows/WOW64/Module.cpp'
+      - '.github/scripts/verify_fex2610_compile_flags.py'
+      - '.github/scripts/test_fex2610_tools.py'
+      - 'docs/benchmarks/ff7r-sd865-cross-repo-architecture.md'
+      - '.github/scripts/test-package-fexcore-2610-wcp.sh'
+      - '.github/scripts/test-build-fexcore-2610-wcp.sh'
+      - 'Scripts/GameNative/**'
+
+permissions:
+  contents: write
+
+env:
+  FEX_SOURCE_SHA: ${{ github.sha }}
+  LLVM_MINGW_TAG: '20250920'
+  LLVM_MINGW_SHA256: 8dd8c34fc051a50c2fae86015f35057f8aae93fe1e19b34537ef1269a8b4c772
+  LLVM_MINGW_ROOT: /opt/llvm-mingw
+
+jobs:
+  build:
+    name: Build ${{ matrix.variant }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [o3-snapdragon865-v82]
+
+    steps:
+      - name: Checkout pipeline branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl dos2unix file git jq \
+            meson ninja-build perl pkg-config python3 tar unzip wget xz-utils zstd
+
+      - name: Run helper contract tests
+        run: |
+          bash .github/scripts/test-package-fexcore-2610-wcp.sh
+          python3 -m unittest discover -s .github/scripts -p test_fex2610_tools.py -v
+          bash .github/scripts/test-build-fexcore-2610-wcp.sh
+          bash -n Scripts/GameNative/package_fexcore_2610_wcp.sh
+          bash -n Scripts/GameNative/build_fexcore_2610_wcp.sh
+
+      - name: Verify phase-0 instrumentation is present
+        run: |
+          grep -Fq 'FEX-FF7R-PHASE0: backend=ARM64EC' Source/Windows/ARM64EC/Module.cpp
+          grep -Fq 'FEX-FF7R-PHASE0: backend=WoW64' Source/Windows/WOW64/Module.cpp
+          grep -Fq 'FEX_PHASE0_SOURCE_SHA_OVERRIDE' Scripts/GameNative/build_fexcore_2610_wcp.sh
+
+      - name: Install pinned llvm-mingw
+        run: |
+          archive="$RUNNER_TEMP/llvm-mingw-${LLVM_MINGW_TAG}.tar.xz"
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://github.com/bylaws/llvm-mingw/releases/download/${LLVM_MINGW_TAG}/llvm-mingw-${LLVM_MINGW_TAG}-ucrt-ubuntu-22.04-x86_64.tar.xz" \
+            -o "$archive"
+          echo "${LLVM_MINGW_SHA256}  ${archive}" | sha256sum -c -
+          sudo rm -rf "$LLVM_MINGW_ROOT"
+          sudo mkdir -p "$LLVM_MINGW_ROOT"
+          sudo tar -C "$LLVM_MINGW_ROOT" --strip-components=1 -xJf "$archive"
+          echo "$LLVM_MINGW_ROOT/bin" >> "$GITHUB_PATH"
+          "$LLVM_MINGW_ROOT/bin/clang" --version
+
+      - name: Stage exact FEX-2610 source
+        id: source
+        run: |
+          source_dir="$RUNNER_TEMP/fex-2610-source"
+          git cat-file -e "${FEX_SOURCE_SHA}^{commit}" || git fetch --no-tags origin main
+          git worktree add --detach "$source_dir" "$FEX_SOURCE_SHA"
+          git -C "$source_dir" submodule sync --recursive
+          git -C "$source_dir" submodule update --init --recursive --depth 1
+          actual="$(git -C "$source_dir" rev-parse HEAD)"
+          test "$actual" = "$FEX_SOURCE_SHA"
+          echo "source_dir=$source_dir" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$actual" >> "$GITHUB_OUTPUT"
+
+      - name: Build and package candidate
+        id: package
+        run: |
+          case "${{ matrix.variant }}" in
+            o3-snapdragon865-v82) suffix=1 ;;
+            *) exit 2 ;;
+          esac
+          version_code=$((261030000 + GITHUB_RUN_NUMBER * 10 + suffix))
+          output_dir="$RUNNER_TEMP/fex-output"
+          mkdir -p "$output_dir"
+          FEX_PHASE0_SOURCE_SHA_OVERRIDE="$FEX_SOURCE_SHA" bash Scripts/GameNative/build_fexcore_2610_wcp.sh \
+            "${{ steps.source.outputs.source_dir }}" \
+            "${{ matrix.variant }}" \
+            "$output_dir" \
+            "$version_code"
+          control_wcp="$(find "$output_dir" -maxdepth 1 -type f -name '*.wcp' -print -quit)"
+          test -n "$control_wcp"
+          stage="$RUNNER_TEMP/ff7r-phase0-stage"
+          mkdir -p "$stage"
+          tar -xJf "$control_wcp" -C "$stage"
+          new_version="2610-GameNative-FF7R-Phase0-${GITHUB_SHA:0:12}"
+          jq --arg v "$new_version" \
+             '.versionName=$v | .description="FF7 Remake opt-in FEX 2610 ARM64EC and WoW64 Phase-0 startup diagnostics"' \
+             "$stage/profile.json" > "$stage/profile.json.tmp"
+          mv "$stage/profile.json.tmp" "$stage/profile.json"
+          wcp="$output_dir/FEXCore-2610-FF7R-Phase0-${GITHUB_SHA:0:12}.wcp"
+          tar -C "$stage" -cJf "$wcp" .
+          rm "$control_wcp"
+          echo "wcp=$wcp" >> "$GITHUB_OUTPUT"
+          echo "output_dir=$output_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Verify WCP
+        run: |
+          wcp="${{ steps.package.outputs.wcp }}"
+          extract="$RUNNER_TEMP/verify-${{ matrix.variant }}"
+          mkdir -p "$extract"
+          tar -tJf "$wcp"
+          tar -xJf "$wcp" -C "$extract"
+          case "${{ matrix.variant }}" in
+            o3-snapdragon865-v82) expected_version="2610-GameNative-FF7R-Phase0-${GITHUB_SHA:0:12}" ;;
+          esac
+          jq -e --arg v "$expected_version" '.type == "FEXCore" and .versionName == $v and (.files | length == 2)' "$extract/profile.json" >/dev/null
+          test -s "$extract/system32/libarm64ecfex.dll"
+          test -s "$extract/system32/libwow64fex.dll"
+          test "$(find "$extract" -type f | wc -l)" -eq 3
+          output_dir="${{ steps.package.outputs.output_dir }}"
+          base="$(basename "$wcp")"
+          (cd "$output_dir" && sha256sum "$base" > "$base.sha256")
+          cat "$output_dir/$base.sha256"
+
+      - name: Upload candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: ff7r-phase0-fex2610-${{ matrix.variant }}
+          path: |
+            ${{ steps.package.outputs.output_dir }}/*.wcp
+            ${{ steps.package.outputs.output_dir }}/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
