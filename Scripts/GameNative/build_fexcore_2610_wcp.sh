@@ -2,6 +2,15 @@
 set -euo pipefail
 
 EXPECTED_SOURCE_SHA="14c92681f4d62cf84d901460e0358de09c8847a7"
+# The FF7R phase-0 workflow may explicitly pin its instrumented source commit.
+# Existing production WCPs continue to build the original 2610 source by default.
+if [[ -n "${FEX_PHASE0_SOURCE_SHA_OVERRIDE:-}" ]]; then
+  [[ "$FEX_PHASE0_SOURCE_SHA_OVERRIDE" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "FEX_PHASE0_SOURCE_SHA_OVERRIDE must be a full 40-digit commit SHA" >&2
+    exit 2
+  }
+  EXPECTED_SOURCE_SHA="$FEX_PHASE0_SOURCE_SHA_OVERRIDE"
+fi
 
 if [[ $# -ne 4 ]]; then
   echo "Usage: $0 <source-dir> <o3|o3-mobile|o3-exynos2400|o3-snapdragon865|o3-snapdragon865-v82> <output-dir> <version-code>" >&2
