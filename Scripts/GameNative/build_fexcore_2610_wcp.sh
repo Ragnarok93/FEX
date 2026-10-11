@@ -56,6 +56,17 @@ if [[ -n "$tune_target" ]]; then
   )
 fi
 
+if [[ "$variant" == "o3-snapdragon865-v82" ]]; then
+  # Not all FEX Windows/CRT/utility objects inherit FEX_TUNE_COMPILE_FLAGS.
+  # Set the ISA baseline in Release C/C++ flags for ALL objects as well as
+  # through TUNE_ARCH for FEX's specific compilation paths.
+  # Both -march occurrences MUST agree (the verifier checks their last value).
+  variant_cmake_args=(
+    "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$tune_target -march=armv8.2-a+crc"
+    "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$tune_target -march=armv8.2-a+crc"
+  )
+fi
+
 [[ -d "$source_dir/.git" || -f "$source_dir/.git" ]] || { echo "Source directory is not a git checkout: $source_dir" >&2; exit 2; }
 actual_source_sha="$(git -C "$source_dir" rev-parse HEAD)"
 if [[ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
