@@ -51,6 +51,8 @@ $end_info$
 #include "Windows/Common/SHMStats.h"
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <cstdio>
 #include <type_traits>
 #include <mutex>
@@ -651,6 +653,11 @@ NTSTATUS ProcessInit() {
     std::this_thread::sleep_for(std::chrono::seconds(StartupSleep()));
   }
 
+  // Diagnostic only: one startup marker, never inside the JIT or frame path.
+  if (const char* phase0 = std::getenv("FEX_FF7R_PHASE0"); phase0 && std::strcmp(phase0, "1") == 0) {
+    LogMan::Msg::IFmt("FEX-FF7R-PHASE0: backend=ARM64EC app={} pid={} wine={}",
+                     AppConfigName, GetCurrentProcessId(), IsWine ? 1 : 0);
+  }
   return STATUS_SUCCESS;
 }
 
