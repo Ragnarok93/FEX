@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -ne 5 ]]; then
-  echo "Usage: $0 <o3|o3-mobile|o3-exynos2400|o3-snapdragon865> <arm64ec-dll> <wow64-dll> <output-dir> <version-code>" >&2
+  echo "Usage: $0 <o3|o3-mobile|o3-exynos2400|o3-snapdragon865|o3-snapdragon865-v82> <arm64ec-dll> <wow64-dll> <output-dir> <version-code>" >&2
   exit 2
 fi
 
@@ -32,6 +32,11 @@ case "$variant" in
     filename="FEXCore-2610-GameNative-O3-Snapdragon865.wcp"
     version_name="2610-GameNative-O3-Snapdragon865"
     description="FEXCore 2610 O3 Snapdragon 865 Cortex-A77 scheduling test build"
+    ;;
+  o3-snapdragon865-v82)
+    filename="FEXCore-2610-GameNative-O3-Snapdragon865-v82.wcp"
+    version_name="2610-GameNative-O3-Snapdragon865-v82"
+    description="Experimental FEXCore 2610 Cortex-A77 scheduled ARMv8.2-A+CRC ISA candidate for Snapdragon 865"
     ;;
   *)
     echo "Unsupported variant: $variant" >&2

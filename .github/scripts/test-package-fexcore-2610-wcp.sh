@@ -43,5 +43,6 @@ run_case o3 FEXCore-2610-GameNative-O3.wcp 2610-GameNative-O3 2610001
 run_case o3-mobile FEXCore-2610-GameNative-O3-MobileTune.wcp 2610-GameNative-O3-MobileTune 2610002
 run_case o3-exynos2400 FEXCore-2610-GameNative-O3-Exynos2400.wcp 2610-GameNative-O3-Exynos2400 2610201
 run_case o3-snapdragon865 FEXCore-2610-GameNative-O3-Snapdragon865.wcp 2610-GameNative-O3-Snapdragon865 2610202
+run_case o3-snapdragon865-v82 FEXCore-2610-GameNative-O3-Snapdragon865-v82.wcp 2610-GameNative-O3-Snapdragon865-v82 2610301
 
 echo "WCP packaging tests passed"

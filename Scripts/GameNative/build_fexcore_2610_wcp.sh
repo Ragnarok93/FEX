@@ -4,7 +4,7 @@ set -euo pipefail
 EXPECTED_SOURCE_SHA="14c92681f4d62cf84d901460e0358de09c8847a7"
 
 if [[ $# -ne 4 ]]; then
-  echo "Usage: $0 <source-dir> <o3|o3-mobile|o3-exynos2400|o3-snapdragon865> <output-dir> <version-code>" >&2
+  echo "Usage: $0 <source-dir> <o3|o3-mobile|o3-exynos2400|o3-snapdragon865|o3-snapdragon865-v82> <output-dir> <version-code>" >&2
   exit 2
 fi
 
@@ -15,6 +15,7 @@ version_code="$4"
 
 variant_cmake_args=()
 tune_target=""
+tune_arch="generic"
 case "$variant" in
   o3)
     tune_cpu=generic
@@ -35,6 +36,13 @@ case "$variant" in
     # This deliberately shares the A77 scheduling baseline with the general mobile build.
     tune_target=cortex-a77
     ;;
+  o3-snapdragon865-v82)
+    tune_cpu=none
+    tune_target=cortex-a77
+    # Experimental ISA candidate: preserve tuning but select actual ARMv8.2-A.
+    # FEX CMake appends +crc for ARM targets. Never use -mcpu=cortex-a77 here.
+    tune_arch=armv8.2-a
+    ;;
   *)
     echo "Unsupported variant: $variant" >&2
     exit 2
@@ -45,6 +53,17 @@ if [[ -n "$tune_target" ]]; then
   variant_cmake_args+=(
     "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$tune_target"
     "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$tune_target"
+  )
+fi
+
+if [[ "$variant" == "o3-snapdragon865-v82" ]]; then
+  # Not all FEX Windows/CRT/utility objects inherit FEX_TUNE_COMPILE_FLAGS.
+  # Set the ISA baseline in Release C/C++ flags for ALL objects as well as
+  # through TUNE_ARCH for FEX's specific compilation paths.
+  # Both -march occurrences MUST agree (the verifier checks their last value).
+  variant_cmake_args=(
+    "-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$tune_target -march=armv8.2-a+crc"
+    "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -mtune=$tune_target -march=armv8.2-a+crc"
   )
 fi
 
@@ -90,7 +109,8 @@ build_arch() {
     -DENABLE_ASSERTIONS=False \
     -DENABLE_CCACHE=False \
     -DBUILD_TESTING=False \
-    -DTUNE_ARCH=generic \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    -DTUNE_ARCH="$tune_arch" \
     -DTUNE_CPU="$tune_cpu" \
     -DOVERRIDE_VERSION=2610 \
     -DOVERRIDE_HASH="$EXPECTED_SOURCE_SHA" \
@@ -99,6 +119,13 @@ build_arch() {
   if [[ -n "$tune_target" ]]; then
     grep -Fq "CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=$tune_target" "$build_dir/CMakeCache.txt"
     grep -Fq "CMAKE_C_FLAGS_RELEASE:STRING=-O3 -DNDEBUG -mtune=$tune_target" "$build_dir/CMakeCache.txt"
+  fi
+
+  if [[ "$variant" == "o3-snapdragon865-v82" ]]; then
+    # Check every actual FEX compiler command; CMakeCache alone can mask a later -march override.
+    python3 "$repo_root/.github/scripts/verify_fex2610_compile_flags.py" \
+      "$build_dir/compile_commands.json" \
+      --arch armv8.2-a+crc --tune cortex-a77 --target "$triple"
   fi
 
   cmake --build "$build_dir" --parallel 2
