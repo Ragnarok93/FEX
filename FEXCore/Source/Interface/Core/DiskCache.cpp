@@ -788,7 +788,14 @@ namespace DiskCache {
     }
 
     if (ReservedBytes) {
-      Writer->QueueWork(fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, std::move(Blob), ReservedBytes));
+      auto Work = fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, std::move(Blob), ReservedBytes);
+      if (Writer) {
+        Writer->QueueWork(std::move(Work));
+      } else {
+        // If the worker queue couldn't be allocated, preserve cache correctness by
+        // writing synchronously. Work-item destruction releases the buffer reservation.
+        Work->Run();
+      }
     } else {
       RWCacheDB->StoreCacheBlob(Key, Blob, Index, IndexLock);
     }
