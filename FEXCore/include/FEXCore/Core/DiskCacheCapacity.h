@@ -18,4 +18,11 @@ constexpr bool CanStoreWithinCapacity(uint64_t MaxBytes, uint64_t CurrentCacheBy
   return PendingIndexBytes <= Remaining;
 }
 
+// Keep capacity admission boundary and overflow behavior checked in every build.
+static_assert(CanStoreWithinCapacity(100, 40, 20, 30, 10));
+static_assert(!CanStoreWithinCapacity(100, 40, 20, 30, 11));
+static_assert(!CanStoreWithinCapacity(100, 101, 0, 0, 0));
+static_assert(CanStoreWithinCapacity(0, UINT64_MAX, UINT64_MAX, UINT64_MAX, UINT64_MAX));
+static_assert(!CanStoreWithinCapacity(UINT64_MAX, UINT64_MAX - 1, 0, 2, 0));
+
 } // namespace FEXCore::DiskCache
