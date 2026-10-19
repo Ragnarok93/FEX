@@ -132,8 +132,15 @@ namespace DiskCache {
     }
     uint64_t WriteOffset = static_cast<uint64_t>(FileSize);
 
-    if (FD->PWrite(Key.bytes, sizeof(Key.bytes), WriteOffset) != sizeof(Key.bytes)) {
+    // Every record is append-only. If any component write fails, roll back the
+    // incomplete record so a torn append cannot make later index records unreadable.
+    auto RollbackAppend = [&]() {
+      FD->Truncate(static_cast<uint64_t>(FileSize));
       return false;
+    };
+
+    if (FD->PWrite(Key.bytes, sizeof(Key.bytes), WriteOffset) != sizeof(Key.bytes)) {
+      return RollbackAppend();
     }
     WriteOffset += sizeof(Key.bytes);
 
@@ -143,7 +150,7 @@ namespace DiskCache {
                                                .uncompressed_size = static_cast<uint32_t>(TotalBlobSize)};
 
     if (FD->PWrite(&ScratchHeader, sizeof(ScratchHeader), WriteOffset) != sizeof(ScratchHeader)) {
-      return false;
+      return RollbackAppend();
     }
     WriteOffset += sizeof(ScratchHeader);
 
@@ -154,7 +161,7 @@ namespace DiskCache {
         continue;
       }
       if (FD->PWrite(Chunk.data(), Chunk.size(), WriteOffset) != static_cast<ssize_t>(Chunk.size())) {
-        return false;
+        return RollbackAppend();
       }
       WriteOffset += Chunk.size();
     }
