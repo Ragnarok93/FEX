@@ -14,6 +14,7 @@
 #include <FEXCore/fextl/robin_map.h>
 #include <FEXCore/fextl/vector.h>
 #include <stdint.h>
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -151,12 +152,14 @@ namespace DiskCache {
     // stores run on the Writer, so returning quick isn't as important
     static constexpr uint32_t STORE_LOCK_TIMEOUT_MS = 1000;
     static constexpr uint64_t BIG_MAPPING_SIZE = 1ULL << 33;
+    static constexpr uint64_t MAX_CACHE_SIZE_BYTES = 1ULL << 30;
 
     FOZFile CacheFOZ;
     uint8_t* CacheFileMapping = nullptr;
     std::atomic<uint64_t> CacheFileSize;
     FOZFile IndexFOZ;
     bool ReadOnly = false;
+    uint64_t MaxSizeBytes = MAX_CACHE_SIZE_BYTES;
   };
 
   class DiskCache {
@@ -191,9 +194,12 @@ namespace DiskCache {
 
     // the Writer holds references to all this stuff above and needs to be last
     fextl::unique_ptr<WorkQueueThread> Writer;
+    std::atomic<uint64_t> PendingWriteBufferBytes {};
+    uint64_t MaxWriteBufferBytes = 0;
 
     FEX_CONFIG_OPT(EnableDiskCache, DISKCACHE);
     FEX_CONFIG_OPT(MapDiskCacheFiles, DISKCACHEFILEMAPPING);
+    FEX_CONFIG_OPT(MemoryBufferMB, DISKCACHEMEMORYBUFFERMB);
     FEX_CONFIG_OPT(RelocationFilter, DISKCACHERELOCATIONFILTER);
     FEX_CONFIG_OPT(BasePathOverride, DISKCACHEPATH);
     FEX_CONFIG_OPT(RODBNames, DISKCACHERODBNAMES);

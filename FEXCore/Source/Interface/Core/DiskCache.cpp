@@ -5,6 +5,7 @@
 #include "FEXHeaderUtils/Filesystem.h"
 #include "FEXCore/Core/DiskCache.h"
 #include "FEXCore/Core/DiskCacheFileMapper.h"
+#include "FEXCore/Core/DiskCacheCapacity.h"
 #include "FEXCore/Utils/LogManager.h"
 #include "Interface/Context/Context.h"
 #include "FEXCore/HLE/SyscallHandler.h"
@@ -12,6 +13,8 @@
 #include "FEXCore/fextl/memory.h"
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <algorithm>
 #include <charconv>
 
 namespace FEXCore {
@@ -253,6 +256,28 @@ namespace DiskCache {
       return false;
     }
 
+    // Account for both append-only FOZ files before writing either one.
+    // When full, keep existing entries readable and decline this new entry.
+    const ssize_t CacheBytes = CacheFOZ.Size();
+    const ssize_t IndexBytes = IndexFOZ.Size();
+    constexpr uint64_t RecordOverhead = sizeof(MesaFOZ::foz_payload_key) + sizeof(MesaFOZ::foz_payload_header);
+    constexpr uint64_t IndexEntryBytes = sizeof(MesaFOZ::mesa_index_db_file_entry);
+    constexpr uint64_t U64Max = std::numeric_limits<uint64_t>::max();
+    if (CacheBytes < 0 || IndexBytes < 0 || Blob.size() > U64Max - RecordOverhead) {
+      CacheFOZ.Unlock();
+      IndexFOZ.Unlock();
+      return false;
+    }
+    const uint64_t PendingCacheBytes = RecordOverhead + static_cast<uint64_t>(Blob.size());
+    const uint64_t PendingIndexBytes = RecordOverhead + IndexEntryBytes;
+    if (!CanStoreWithinCapacity(MaxSizeBytes, static_cast<uint64_t>(CacheBytes), static_cast<uint64_t>(IndexBytes),
+                                PendingCacheBytes, PendingIndexBytes)) {
+      CacheFOZ.Unlock();
+      IndexFOZ.Unlock();
+      // Capacity exhaustion is a cache miss policy decision, not an execution failure.
+      return true;
+    }
+
     // write cache side first so we get offset for index
     std::span<const uint8_t> BlobChunks[] = {Blob};
     uint64_t BlobOffset = 0;
@@ -323,6 +348,7 @@ namespace DiskCache {
 
   void DiskCache::Init(FEXCore::Context::ContextImpl* CTX) {
     this->CTX = CTX;
+    MaxWriteBufferBytes = std::min<uint64_t>(static_cast<uint64_t>(MemoryBufferMB()) * 1024ULL * 1024ULL, 1ULL << 30);
 
     if (!EnableDiskCache) {
       return;
@@ -507,11 +533,18 @@ namespace DiskCache {
     IndexedDB* DB;
     MesaFOZ::foz_payload_key Key;
     fextl::vector<uint8_t> Blob;
-    CacheStoreWorkItem(DiskCache* Self, IndexedDB* DB, const MesaFOZ::foz_payload_key& Key, fextl::vector<uint8_t>&& Blob)
+    uint64_t ReservedBytes {};
+    CacheStoreWorkItem(DiskCache* Self, IndexedDB* DB, const MesaFOZ::foz_payload_key& Key, fextl::vector<uint8_t>&& Blob, uint64_t ReservedBytes)
       : Self(Self)
       , DB(DB)
       , Key(Key)
-      , Blob(std::move(Blob)) {}
+      , Blob(std::move(Blob))
+      , ReservedBytes(ReservedBytes) {}
+    ~CacheStoreWorkItem() override {
+      if (ReservedBytes) {
+        Self->PendingWriteBufferBytes.fetch_sub(ReservedBytes, std::memory_order_relaxed);
+      }
+    }
     void Run() override {
       DB->StoreCacheBlob(Key, Blob, Self->Index, Self->IndexLock);
     }
@@ -667,8 +700,24 @@ namespace DiskCache {
 
     memcpy(BlobData + GuestCodeOffset, GuestCode.data(), GuestCode.size());
 
-    // hand the rest off to the writer thread
-    Writer->QueueWork(fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, std::move(Blob)));
+    // Buffer queued writes only within the configured memory budget. If disabled or full,
+    // store synchronously rather than growing an unbounded queue of cache blobs.
+    uint64_t ReservedBytes = 0;
+    if (MaxWriteBufferBytes && Blob.size() <= MaxWriteBufferBytes) {
+      uint64_t Pending = PendingWriteBufferBytes.load(std::memory_order_relaxed);
+      while (Pending <= MaxWriteBufferBytes - Blob.size()) {
+        if (PendingWriteBufferBytes.compare_exchange_weak(Pending, Pending + Blob.size(), std::memory_order_relaxed)) {
+          ReservedBytes = Blob.size();
+          break;
+        }
+      }
+    }
+
+    if (ReservedBytes) {
+      Writer->QueueWork(fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, std::move(Blob), ReservedBytes));
+    } else {
+      RWCacheDB->StoreCacheBlob(Key, Blob, Index, IndexLock);
+    }
     return true;
   }
 
