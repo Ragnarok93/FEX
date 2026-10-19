@@ -1,0 +1,100 @@
+name: Snapdragon-32-Bit ARM64 build
+
+on:
+  push:
+    branches:
+      - Snapdragon-32-Bit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snapdragon-32-bit-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUILD_TYPE: Release
+  CC: clang
+  CXX: clang++
+  FEX_PORTABLE: "1"
+
+jobs:
+  arm64-build-test:
+    name: ARM64 build and core tests (ARMv8.2-A baseline)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld cmake ninja-build ccache nasm pkg-config \
+            python3 python3-xxhash \
+            libcapstone-dev libepoxy-dev libvulkan-dev \
+            libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxrender-dev \
+            libxkbcommon-dev libwayland-dev libdbus-1-dev libudev-dev \
+            libunwind-dev libssl-dev libdrm-dev libgl-dev libegl-dev \
+            libxshmfence-dev libxxhash-dev zlib1g-dev
+
+      - name: Checkout pinned submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --depth 1
+
+      - name: Configure for Snapdragon 865-compatible ARM64
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/stage" \
+            -DCMAKE_C_FLAGS="-march=armv8.2-a" \
+            -DCMAKE_CXX_FLAGS="-march=armv8.2-a" \
+            -DENABLE_LTO=OFF \
+            -DENABLE_ASSERTIONS=ON \
+            -DENABLE_CCACHE=ON \
+            -DBUILD_THUNKS=OFF \
+            -DBUILD_FEX_LINUX_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build --parallel 2
+
+      - name: Install staged runtime
+        run: cmake --build build --target install --parallel 2
+
+      - name: Run API tests
+        run: cmake --build build --target api_tests fexcore_apitests --parallel 2
+
+      - name: Run ARM emitter tests
+        run: cmake --build build --target emitter_tests --parallel 2
+
+      - name: Record build metadata
+        if: always()
+        run: |
+          mkdir -p stage
+          {
+            echo "repository=$GITHUB_REPOSITORY"
+            echo "ref=$GITHUB_REF"
+            echo "commit=$GITHUB_SHA"
+            echo "runner_arch=$(uname -m)"
+            echo "compiler=$(clang++ --version | head -n 1)"
+            echo "target_flags=-march=armv8.2-a"
+            echo "thunks_built=false"
+            echo "guest_linux_tests_built=false"
+          } > stage/BUILD-METADATA.txt
+
+      - name: Upload staged runtime and metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Snapdragon-32-Bit-${{ github.sha }}
+          path: |
+            stage/
+            build/compile_commands.json
+          if-no-files-found: warn
+          retention-days: 14
