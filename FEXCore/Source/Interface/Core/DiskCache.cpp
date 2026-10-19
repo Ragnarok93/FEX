@@ -344,6 +344,10 @@ namespace DiskCache {
     std::span<const uint8_t> IndexBlobChunks[] = {{(const uint8_t*)&IndexEntry, sizeof(IndexEntry)}};
     uint64_t UnusedIndexBlobOffset = 0;
     if (!IndexFOZ.WriteBlob(Key, IndexBlobChunks, UnusedIndexBlobOffset)) {
+      // The cache payload is not reachable until its index record is committed.
+      // Remove that orphan append if the index write fails, keeping both files in
+      // sync and preserving capacity for subsequent stores.
+      CacheFOZ.Truncate(static_cast<uint64_t>(CacheBytes));
       CacheFOZ.Unlock();
       IndexFOZ.Unlock();
       return false;
