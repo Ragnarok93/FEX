@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang lld cmake ninja-build ccache nasm pkg-config qtbase5-dev \
+            clang lld cmake ninja-build ccache nasm pkg-config \
             python3 python3-xxhash \
             libcapstone-dev libepoxy-dev libvulkan-dev \
             libx11-dev libxext-dev libxfixes-dev libxrandr-dev libxrender-dev \
@@ -55,6 +55,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/stage" \
             -DCMAKE_C_FLAGS="-march=armv8.2-a" \
             -DCMAKE_CXX_FLAGS="-march=armv8.2-a" \
+            -DBUILD_FEXCONFIG=OFF \
             -DENABLE_LTO=OFF \
             -DENABLE_ASSERTIONS=ON \
             -DENABLE_CCACHE=ON \
