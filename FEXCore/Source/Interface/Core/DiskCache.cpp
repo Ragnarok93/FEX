@@ -460,7 +460,9 @@ namespace DiskCache {
       MesaFOZ::foz_payload_key MetadataKey;
       memset(MetadataKey.bytes, 0xFF, sizeof(MetadataKey));
       RWCacheDB->StoreCacheBlob(MetadataKey, {BucketBytes.data(), BucketBytes.size()}, Index, IndexLock);
-      Index.clear();
+      // Metadata is stored in the same index map as code blobs; remove only its
+      // sentinel key so any valid code entries recovered from the DB remain usable.
+      Index.erase(~uint64_t {});
     }
 
     std::string_view RONames = RODBNames();
