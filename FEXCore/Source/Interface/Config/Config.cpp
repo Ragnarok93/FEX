@@ -516,7 +516,10 @@ template void Value<StringArrayType>::GetListIfExists(FEXCore::Config::ConfigOpt
 fextl::string SerializeForCache() {
   fextl::string Serialized {};
   auto Append = [&Serialized](ConfigOption Option, auto Value) {
-    Serialized.append(fextl::fmt::format("{}\0{}\0{}\0", FEXCore::ToUnderlying(Option), FEXCore::ToUnderlying(Option), Value));
+    Serialized.append(fextl::fmt::format("{}", FEXCore::ToUnderlying(Option)));
+    Serialized.push_back('\0');
+    Serialized.append(fextl::fmt::format("{}", Value));
+    Serialized.push_back('\0');
   };
   const auto SerializeValue = [&Append]<typename T, ConfigOption Option>(auto ConfigVal, const auto) {
     if (!Config_AffectsCodeGen[FEXCore::ToUnderlying(Option)]) return;

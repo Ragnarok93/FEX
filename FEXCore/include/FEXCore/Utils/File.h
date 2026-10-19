@@ -117,7 +117,6 @@ public:
 
   ssize_t PRead(void* Buffer, size_t Bytes, uint64_t Offset) {
     if (Seekable) {
-      LOGMAN_THROW_A_FMT(false, "Can't use positioned reads on a seekable file!");
       return -1;
     }
 #ifndef _WIN32
@@ -134,7 +133,6 @@ public:
 
   ssize_t PWrite(const void* Buffer, size_t Bytes, uint64_t Offset) {
     if (Seekable) {
-      LOGMAN_THROW_A_FMT(false, "Can't use positioned writes on a seekable file!");
       return -1;
     }
 #ifndef _WIN32
