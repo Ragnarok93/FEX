@@ -228,7 +228,7 @@ namespace DiskCache {
           IndexBlobPayload->size > (uint64_t)CacheFOZSize - IndexBlobPayload->cache_db_file_offset) {
         continue;
       }
-      const bool IsMetadataKey = std::all_of(std::begin(FOZKey->bytes), std::end(FOZKey->bytes), [](uint8_t Byte) { return Byte == 0xFF; });
+      const bool IsMetadataKey = std::all_of(FOZKey->bytes, FOZKey->bytes + sizeof(FOZKey->bytes), [](uint8_t Byte) { return Byte == 0xFF; });
       if (!IsMetadataKey) {
         uint64_t Key {};
         const char* KeyBegin = reinterpret_cast<const char*>(FOZKey->bytes);
