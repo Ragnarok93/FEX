@@ -5,6 +5,9 @@
 #include <thread>
 
 constexpr auto SleepAmount = std::chrono::milliseconds(250);
+// The timeout uses the architectural cycle counter, while the test measures with
+// steady_clock. Allow a small cross-clock conversion tolerance (0.4% of the timeout).
+constexpr auto TimingTolerance = std::chrono::milliseconds(1);
 
 TEST_CASE("FutexSpin-Timed-8bit") {
   uint8_t Test {};
@@ -16,7 +19,7 @@ TEST_CASE("FutexSpin-Timed-8bit") {
 
   // Use a monotonic clock for elapsed-time checks; wall-clock adjustments must not affect timeout assertions.
   // The futex spinwait needs to have slept for at /least/ the amount specified. It will always run slightly late.
-  REQUIRE(std::chrono::duration_cast<std::chrono::nanoseconds>(diff) >= std::chrono::duration_cast<std::chrono::nanoseconds>(SleepAmount));
+  REQUIRE(diff + TimingTolerance >= SleepAmount);
 }
 
 TEST_CASE("FutexSpin-Sleep-8bit") {
@@ -60,7 +63,7 @@ TEST_CASE("FutexSpin-Timed-16bit") {
   auto diff = end - now;
 
   // The futex spinwait needs to have slept for at /least/ the amount specified. It will always run slightly late.
-  REQUIRE(std::chrono::duration_cast<std::chrono::nanoseconds>(diff) >= std::chrono::duration_cast<std::chrono::nanoseconds>(SleepAmount));
+  REQUIRE(diff + TimingTolerance >= SleepAmount);
 }
 
 TEST_CASE("FutexSpin-Timed-32bit") {
@@ -72,7 +75,7 @@ TEST_CASE("FutexSpin-Timed-32bit") {
   auto diff = end - now;
 
   // The futex spinwait needs to have slept for at /least/ the amount specified. It will always run slightly late.
-  REQUIRE(std::chrono::duration_cast<std::chrono::nanoseconds>(diff) >= std::chrono::duration_cast<std::chrono::nanoseconds>(SleepAmount));
+  REQUIRE(diff + TimingTolerance >= SleepAmount);
 }
 
 TEST_CASE("FutexSpin-Timed-64bit") {
@@ -84,5 +87,5 @@ TEST_CASE("FutexSpin-Timed-64bit") {
   auto diff = end - now;
 
   // The futex spinwait needs to have slept for at /least/ the amount specified. It will always run slightly late.
-  REQUIRE(std::chrono::duration_cast<std::chrono::nanoseconds>(diff) >= std::chrono::duration_cast<std::chrono::nanoseconds>(SleepAmount));
+  REQUIRE(diff + TimingTolerance >= SleepAmount);
 }
