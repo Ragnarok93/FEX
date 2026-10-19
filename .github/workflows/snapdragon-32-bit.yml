@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: snapdragon-32-bit-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   BUILD_TYPE: Release
