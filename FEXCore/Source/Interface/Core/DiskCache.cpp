@@ -193,7 +193,7 @@ namespace DiskCache {
     return true;
   }
 
-  void IndexedDB::PopulateIndex(Index& CacheIndex, bool& FoundMetadata) {
+  void IndexedDB::PopulateIndex(Index& CacheIndex, bool& FoundMetadata, std::span<const uint8_t> ExpectedMetadata, bool ValidateMetadata) {
     fextl::vector<uint8_t> Data;
     if (!IndexFOZ.ReadAll(Data)) {
       return;
@@ -228,7 +228,8 @@ namespace DiskCache {
           IndexBlobPayload->size > (uint64_t)CacheFOZSize - IndexBlobPayload->cache_db_file_offset) {
         continue;
       }
-      if (FOZKey->bytes[39] != 0xFF) {
+      const bool IsMetadataKey = std::all_of(std::begin(FOZKey->bytes), std::end(FOZKey->bytes), [](uint8_t Byte) { return Byte == 0xFF; });
+      if (!IsMetadataKey) {
         uint64_t Key {};
         const char* KeyBegin = reinterpret_cast<const char*>(FOZKey->bytes);
         const char* KeyEnd = reinterpret_cast<const char*>(&FOZKey->bytes[16]);
@@ -240,6 +241,21 @@ namespace DiskCache {
         }
         CacheIndex.insert({IndexBlobPayload->hash, {this, IndexBlobPayload->cache_db_file_offset, IndexBlobPayload->size}});
       } else {
+        // Treat metadata as present only if the index record and payload match the
+        // bucket we opened. A corrupt/stale sentinel must not suppress metadata repair.
+        if (IndexBlobPayload->hash != ~uint64_t {}) {
+          continue;
+        }
+        if (ValidateMetadata) {
+          if (IndexBlobPayload->size != ExpectedMetadata.size()) {
+            continue;
+          }
+          fextl::vector<uint8_t> MetadataBlob(IndexBlobPayload->size);
+          if (!ReadCacheBlob(IndexBlobPayload->cache_db_file_offset, MetadataBlob) ||
+              !std::equal(MetadataBlob.begin(), MetadataBlob.end(), ExpectedMetadata.begin(), ExpectedMetadata.end())) {
+            continue;
+          }
+        }
         FoundMetadata = true;
       }
     }
@@ -374,7 +390,7 @@ namespace DiskCache {
     return true;
   }
 
-  bool DiskCache::OpenCacheDB(const fextl::string& CacheDBName, bool ReadOnly) {
+  bool DiskCache::OpenCacheDB(const fextl::string& CacheDBName, bool ReadOnly, std::span<const uint8_t> ExpectedMetadata) {
     fextl::unique_ptr<IndexedDB> CurDB;
 
     if (!ReadOnly && RWCacheDB) {
@@ -392,7 +408,7 @@ namespace DiskCache {
       return false;
     }
 
-    CurDB->PopulateIndex(Index, FoundMetadata);
+    CurDB->PopulateIndex(Index, FoundMetadata, ExpectedMetadata, !ReadOnly);
 
     if (ReadOnly) {
       ROCacheDBs.push_back(std::move(CurDB));
@@ -453,7 +469,7 @@ namespace DiskCache {
     }
 
     fextl::string RWDBBasePath = BasePath + fextl::fmt::format("RWCacheDB_{:016x}", ProcessBucketHash);
-    OpenCacheDB(RWDBBasePath, false);
+    OpenCacheDB(RWDBBasePath, false, BucketBytes);
 
     if (RWCacheDB && !FoundMetadata) {
       // we just opened a fresh cache, add a metadata blob
@@ -472,7 +488,7 @@ namespace DiskCache {
       if (!ROName.empty()) {
         fextl::string RODBBasePath = BasePath;
         RODBBasePath += ROName;
-        OpenCacheDB(RODBBasePath, true);
+        OpenCacheDB(RODBBasePath, true, BucketBytes);
       }
       if (Delim == std::string_view::npos) {
         break;
