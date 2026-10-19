@@ -7,6 +7,7 @@
 #include "FEXCore/Core/DiskCacheFileMapper.h"
 #include "FEXCore/Core/DiskCacheCapacity.h"
 #include "FEXCore/Utils/LogManager.h"
+#include "FEXCore/Utils/TypeDefines.h"
 #include "Interface/Context/Context.h"
 #include "FEXCore/HLE/SyscallHandler.h"
 #include "FEXCore/Utils/File.h"
