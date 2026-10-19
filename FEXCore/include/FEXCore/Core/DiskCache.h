@@ -130,7 +130,11 @@ namespace DiskCache {
     }
     ssize_t Size();
     bool Truncate(uint64_t NewSize) {
-      return FD && FD->Truncate(NewSize);
+      if (WritePoisoned || !FD || !FD->Truncate(NewSize)) {
+        WritePoisoned = true;
+        return false;
+      }
+      return true;
     }
     bool ReadAll(fextl::vector<uint8_t>& Out); // from first blob
     bool ReadBlob(uint64_t Offset, std::span<uint8_t> OutBlob);
@@ -142,6 +146,8 @@ namespace DiskCache {
     fextl::string FileName;
     fextl::unique_ptr<File::File> FD;
     bool ReadOnly = false;
+    // If rollback fails, never append behind a potentially torn record.
+    bool WritePoisoned = false;
   };
 
   class IndexedDB {
