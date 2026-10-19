@@ -226,16 +226,22 @@ namespace DiskCache {
   }
 
   bool IndexedDB::ReadCacheBlob(uint64_t Offset, std::span<uint8_t> OutBlob) {
-    if (CacheFileMapping && (ReadOnly || Offset + OutBlob.size() <= BIG_MAPPING_SIZE)) {
-      if (Offset + OutBlob.size() > CacheFileSize) {
+    if (CacheFileMapping) {
+      const uint64_t CurrentFileSize = CacheFileSize.load(std::memory_order_relaxed);
+      // Check ranges with subtraction to avoid unsigned overflow from corrupt index entries.
+      if (Offset > CurrentFileSize || OutBlob.size() > CurrentFileSize - Offset) {
         return false;
       }
-      // todo could reduce copies by having a private mapping for relocs, etc
-      memcpy(OutBlob.data(), CacheFileMapping + Offset, OutBlob.size());
-      return true;
-    } else {
-      return CacheFOZ.ReadBlob(Offset, OutBlob);
+
+      // Read-only mappings cover the full file; writable mappings reserve a fixed virtual range.
+      // If a requested range falls outside that reservation, use positioned file I/O instead.
+      if (ReadOnly || (Offset <= BIG_MAPPING_SIZE && OutBlob.size() <= BIG_MAPPING_SIZE - Offset)) {
+        // todo could reduce copies by having a private mapping for relocs, etc
+        memcpy(OutBlob.data(), CacheFileMapping + Offset, OutBlob.size());
+        return true;
+      }
     }
+    return CacheFOZ.ReadBlob(Offset, OutBlob);
   }
 
   bool IndexedDB::StoreCacheBlob(const MesaFOZ::foz_payload_key& Key, std::span<const uint8_t> Blob, Index& Index, std::mutex& IndexMutex) {
