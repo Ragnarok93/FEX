@@ -1106,6 +1106,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
       EntryPoint.second += Delta;
     }
     CodeBegin += Delta;
+    CodeData.HostCodeOffset = CodeData.BlockBegin - CurrentCodeBuffer->Ptr;
 
     for (std::size_t Idx = PrevNumAllocations; Idx != Relocations.size(); ++Idx) {
       Relocations[Idx].Header.Offset += CodeBuffers.LatestOffset;
@@ -1152,6 +1153,25 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   this->IR = nullptr;
 
   return std::move(CodeData);
+}
+
+CPUBackend::CompiledCode Arm64JITCore::LoadCachedCode(std::span<const uint8_t> HostBytes, std::span<const DiskCache::BlobEntryPoint> EntryPoints) {
+  // Cached blocks are stored aligned so that entrypoint offsets remain valid.
+  LOGMAN_THROW_A_FMT(HostBytes.size() % 16 == 0, "Needs to be 16B aligned!");
+  auto AllocatedInfo = AllocateCodeBufferInSharedCache(HostBytes.size());
+
+  uint8_t* Dest = AllocatedInfo.BufferAllocationOffset;
+  memcpy(Dest, HostBytes.data(), HostBytes.size());
+  ClearICache(Dest, HostBytes.size());
+
+  CPUBackend::CompiledCode Result;
+  Result.BlockBegin = Dest;
+  Result.Size = HostBytes.size();
+  Result.HostCodeOffset = Dest - CurrentCodeBuffer->Ptr;
+  for (const auto& Ep : EntryPoints) {
+    Result.EntryPoints[Ep.GuestRIP] = Dest + Ep.HostOffset;
+  }
+  return Result;
 }
 
 void Arm64JITCore::ResetStack() {

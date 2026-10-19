@@ -223,6 +223,10 @@ public:
 #endif
   }
 
+  FileHandleType GetHandle() {
+    return Handle;
+  }
+
 protected:
 
   File(FileHandleType Handle, bool ShouldClose)
