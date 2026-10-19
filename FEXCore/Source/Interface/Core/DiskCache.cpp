@@ -194,13 +194,17 @@ namespace DiskCache {
     const uint8_t* IndexDataStart = Data.data();
     const size_t IndexDataSize = Data.size();
     size_t ReadOffset = 0;
-    while (ReadOffset + sizeof(MesaFOZ::foz_payload_key) + sizeof(MesaFOZ::foz_payload_header) <= IndexDataSize) {
+    constexpr size_t RecordHeaderSize = sizeof(MesaFOZ::foz_payload_key) + sizeof(MesaFOZ::foz_payload_header);
+    while (ReadOffset <= IndexDataSize && IndexDataSize - ReadOffset >= RecordHeaderSize) {
       const auto* FOZKey = reinterpret_cast<const MesaFOZ::foz_payload_key*>(IndexDataStart + ReadOffset);
       ReadOffset += sizeof(MesaFOZ::foz_payload_key);
       const auto* FOZHeader = reinterpret_cast<const MesaFOZ::foz_payload_header*>(IndexDataStart + ReadOffset);
       ReadOffset += sizeof(MesaFOZ::foz_payload_header);
 
-      if (FOZHeader->payload_size != sizeof(MesaFOZ::mesa_index_db_file_entry) || ReadOffset + FOZHeader->payload_size > IndexDataSize) {
+      // Use subtraction-based bounds checks so corrupted lengths cannot wrap size_t
+      // on 32-bit hosts and make the index parser read beyond the file buffer.
+      if (FOZHeader->payload_size != sizeof(MesaFOZ::mesa_index_db_file_entry) ||
+          ReadOffset > IndexDataSize || FOZHeader->payload_size > IndexDataSize - ReadOffset) {
         break;
       }
       const auto* IndexBlobPayload = reinterpret_cast<const MesaFOZ::mesa_index_db_file_entry*>(IndexDataStart + ReadOffset);
