@@ -559,12 +559,6 @@ DEF_OP(Vector_F64ToI32) {
       }
     }
   } else {
-    // This has a known precision issue that isn't easily resolvable without throwing away performance.
-    // Doing the conversion in multi-stage steps has an issue that you can lose precision in the f32->i32 step if your source was f64.
-    // To get around this with ASIMD FEX needs to use fcvtzs (Scalar, Integer, to GPR) for each F64 to be directly converted to i32.
-    // This is a very costly transform that the SVE path doesn't need to do since it supports f64->i32 directly.
-    // If this precision issue is necessary then we can add an option for it in the future.
-
     ///< Round float to integral depending on rounding mode.
     ///< Skip TowardsZero as fcvtzs below already truncates toward zero on its own.
     auto CVTReg = Dst.Q();
