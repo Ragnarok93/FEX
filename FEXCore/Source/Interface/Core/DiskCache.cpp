@@ -273,6 +273,18 @@ namespace DiskCache {
       return false;
     }
 
+    // Another writer may have published this hash after our optimistic lookup above.
+    // Recheck after acquiring the per-database file locks so concurrent stores don't
+    // append duplicate records and consume the bounded cache capacity unnecessarily.
+    {
+      std::lock_guard Guard(IndexMutex);
+      if (Index.contains(Hash)) {
+        CacheFOZ.Unlock();
+        IndexFOZ.Unlock();
+        return true;
+      }
+    }
+
     // Account for both append-only FOZ files before writing either one.
     // When full, keep existing entries readable and decline this new entry.
     const ssize_t CacheBytes = CacheFOZ.Size();
