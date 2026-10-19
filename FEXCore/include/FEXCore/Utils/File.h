@@ -320,7 +320,7 @@ private:
   FileHandleType Handle {};
   bool Seekable = true;
 #ifdef _WIN32
-  std::mutex PositionedIOMutex;
+  inline static std::mutex PositionedIOMutex;
 #endif
   bool Locked = false;
 #ifndef _WIN32
