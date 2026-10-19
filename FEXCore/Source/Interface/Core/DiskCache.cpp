@@ -7,7 +7,6 @@
 #include "FEXCore/Core/DiskCacheFileMapper.h"
 #include "FEXCore/Core/DiskCacheCapacity.h"
 #include "FEXCore/Utils/LogManager.h"
-#include "FEXCore/Utils/TypeDefines.h"
 #include "Interface/Context/Context.h"
 #include "FEXCore/HLE/SyscallHandler.h"
 #include "FEXCore/Utils/File.h"
@@ -422,17 +421,19 @@ namespace DiskCache {
     // upstream 2610. This isolates cache generations by FEX cache format and host
     // features, while 32/64-bit mode and serialized configuration select a DB inside
     // that machine bucket. Existing single-hash cache directories remain untouched.
-    const auto HostFeatureHash = CTX->HostFeatures.HashForCaching();
+    const uint64_t HostFeaturesHash = CTX->HostFeatures.HashForCaching();
 
     struct __attribute__((packed)) {
       uint16_t FormatVersion;
       uint64_t HostFeaturesHash;
-    } MachineBucketData = {FormatVersion, HostFeatureHash.HostFeaturesHash};
+    } MachineBucketData = {FormatVersion, HostFeaturesHash};
 
     fextl::vector<uint8_t> BucketBytes(sizeof(MachineBucketData) + 2 + SerializedConfig.size());
     memcpy(BucketBytes.data(), &MachineBucketData, sizeof(MachineBucketData));
     BucketBytes[sizeof(MachineBucketData)] = CTX->Config.Is64BitMode;
-    BucketBytes[sizeof(MachineBucketData) + 1] = FEXCore::ToUnderlying(HostFeatureHash.HostType);
+    // This 2605 baseline has a single AArch64 host backend and no HostType
+    // discriminator yet; reserve the upstream process-bucket byte as zero.
+    BucketBytes[sizeof(MachineBucketData) + 1] = 0;
     memcpy(BucketBytes.data() + sizeof(MachineBucketData) + 2, SerializedConfig.data(), SerializedConfig.size());
 
     const uint64_t MachineBucketHash = XXH3_64bits(BucketBytes.data(), sizeof(MachineBucketData));
