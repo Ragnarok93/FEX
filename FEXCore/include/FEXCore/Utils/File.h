@@ -259,6 +259,23 @@ public:
 #endif
   }
 
+  // Restore a file to a previously recorded length after an incomplete append.
+  bool Truncate(uint64_t NewSize) {
+#ifndef _WIN32
+    if (NewSize > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
+      return false;
+    }
+    return ftruncate(Handle, static_cast<off_t>(NewSize)) == 0;
+#else
+    std::lock_guard Guard(PositionedIOMutex);
+    LARGE_INTEGER Distance {.QuadPart = static_cast<LONGLONG>(NewSize)};
+    if (!SetFilePointerEx(Handle, Distance, nullptr, FILE_BEGIN)) {
+      return false;
+    }
+    return SetEndOfFile(Handle);
+#endif
+  }
+
   /**
    * @brief Seek the file pointer location.
    *
