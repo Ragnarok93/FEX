@@ -1156,12 +1156,32 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
 }
 
 CPUBackend::CompiledCode Arm64JITCore::LoadCachedCode(std::span<const uint8_t> HostBytes, std::span<const DiskCache::BlobEntryPoint> EntryPoints) {
-  // Cached blocks are stored aligned so that entrypoint offsets remain valid.
-  LOGMAN_THROW_A_FMT(HostBytes.size() % 16 == 0, "Needs to be 16B aligned!");
-  auto AllocatedInfo = AllocateCodeBufferInSharedCache(HostBytes.size());
+  LOGMAN_THROW_A_FMT(HostBytes.size() % 16 == 0, "Disk-cache code must be 16-byte aligned!");
 
-  uint8_t* Dest = AllocatedInfo.BufferAllocationOffset;
+  auto CodeBufferLock = std::unique_lock {CodeBuffers.CodeBufferWriteMutex};
+  if (auto Prev = CheckCodeBufferUpdate()) {
+    Allocator::VirtualDontNeed(ThreadState->CallRetStackBase, FEXCore::Core::InternalThreadState::CALLRET_STACK_SIZE);
+    auto lk = ThreadState->LookupCache->AcquireWriteLock();
+    ThreadState->LookupCache->ChangeGuestToHostMapping(*Prev, *CurrentCodeBuffer->LookupCache, lk);
+  }
+
+  SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->AllocatedSize);
+  SetCursorOffset(CodeBuffers.LatestOffset);
+  Align16B();
+  if (GetCursorOffset() + HostBytes.size() > CurrentCodeBuffer->UsableSize()) {
+    CTX->ClearCodeCache(ThreadState);
+    SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->AllocatedSize);
+    SetCursorOffset(CodeBuffers.LatestOffset);
+    Align16B();
+  }
+  if (GetCursorOffset() + HostBytes.size() > CurrentCodeBuffer->UsableSize()) {
+    return {};
+  }
+
+  uint8_t* Dest = GetCursorAddress<uint8_t*>();
   memcpy(Dest, HostBytes.data(), HostBytes.size());
+  SetCursorOffset(GetCursorOffset() + HostBytes.size());
+  CodeBuffers.LatestOffset = GetCursorOffset();
   ClearICache(Dest, HostBytes.size());
 
   CPUBackend::CompiledCode Result;
