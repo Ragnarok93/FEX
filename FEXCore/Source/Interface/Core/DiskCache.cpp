@@ -114,26 +114,33 @@ namespace DiskCache {
   }
 
   bool FOZFile::WriteBlob(const MesaFOZ::foz_payload_key& Key, std::span<const std::span<const uint8_t>> BlobChunks, uint64_t& OutBlobOffset) {
+    // Fossilize stores payload sizes as uint32_t. Validate the complete payload before
+    // appending anything, otherwise a truncated header can make the trailing record
+    // unreadable after a large or overflowed write.
+    uint64_t TotalBlobSize = 0;
+    for (const std::span<const uint8_t>& Chunk : BlobChunks) {
+      if (Chunk.size() > std::numeric_limits<uint32_t>::max() - TotalBlobSize) {
+        return false;
+      }
+      TotalBlobSize += Chunk.size();
+    }
+
     ssize_t FileSize = FD->Size();
-    if (FileSize < 0) {
+    if (FileSize < 0 || static_cast<uint64_t>(FileSize) >
+                          std::numeric_limits<uint64_t>::max() - sizeof(Key.bytes) - sizeof(MesaFOZ::foz_payload_header) - TotalBlobSize) {
       return false;
     }
-    uint64_t WriteOffset = (uint64_t)FileSize;
+    uint64_t WriteOffset = static_cast<uint64_t>(FileSize);
 
     if (FD->PWrite(Key.bytes, sizeof(Key.bytes), WriteOffset) != sizeof(Key.bytes)) {
       return false;
     }
     WriteOffset += sizeof(Key.bytes);
 
-    uint64_t TotalBlobSize = 0;
-    for (const std::span<const uint8_t>& Chunk : BlobChunks) {
-      TotalBlobSize += Chunk.size();
-    }
-
-    MesaFOZ::foz_payload_header ScratchHeader {.payload_size = (uint32_t)TotalBlobSize,
+    MesaFOZ::foz_payload_header ScratchHeader {.payload_size = static_cast<uint32_t>(TotalBlobSize),
                                                .format = MesaFOZ::FOSSILIZE_COMPRESSION_NONE,
                                                .crc = 0, // todo? maybe
-                                               .uncompressed_size = (uint32_t)TotalBlobSize};
+                                               .uncompressed_size = static_cast<uint32_t>(TotalBlobSize)};
 
     if (FD->PWrite(&ScratchHeader, sizeof(ScratchHeader), WriteOffset) != sizeof(ScratchHeader)) {
       return false;
@@ -143,10 +150,10 @@ namespace DiskCache {
     OutBlobOffset = WriteOffset;
 
     for (const std::span<const uint8_t>& Chunk : BlobChunks) {
-      if (Chunk.size() == 0) {
+      if (Chunk.empty()) {
         continue;
       }
-      if (FD->PWrite(Chunk.data(), Chunk.size(), WriteOffset) != (ssize_t)Chunk.size()) {
+      if (FD->PWrite(Chunk.data(), Chunk.size(), WriteOffset) != static_cast<ssize_t>(Chunk.size())) {
         return false;
       }
       WriteOffset += Chunk.size();
@@ -234,6 +241,10 @@ namespace DiskCache {
   bool IndexedDB::StoreCacheBlob(const MesaFOZ::foz_payload_key& Key, std::span<const uint8_t> Blob, Index& Index, std::mutex& IndexMutex) {
     if (ReadOnly) {
       // shouldn't happen
+      return false;
+    }
+    // The FOZ record header and in-memory index both store blob lengths as uint32_t.
+    if (Blob.size() > std::numeric_limits<uint32_t>::max()) {
       return false;
     }
     uint64_t Hash;
@@ -596,16 +607,41 @@ namespace DiskCache {
       }
     }
 
-    const uint32_t EntryPointCount = (uint32_t)CompiledCode.EntryPoints.size();
-    const uint32_t TouchedGuestPagesCount = DecodedBlockInfo ? (uint32_t)DecodedBlockInfo->CodePages.size() : 0;
+    // BlobFixedHeader and the FOZ payload use 32-bit lengths/counts. Reject blocks
+    // that cannot be represented instead of truncating fields or overflowing offsets.
+    constexpr size_t MaxSerializedField = std::numeric_limits<uint32_t>::max();
+    if (CompiledCode.Size > MaxSerializedField || GuestCode.size() > MaxSerializedField ||
+        CompiledCode.EntryPoints.size() > MaxSerializedField || Relocations.size() > MaxSerializedField ||
+        (DecodedBlockInfo && DecodedBlockInfo->CodePages.size() > MaxSerializedField) ||
+        SmallRelocCount > MaxSerializedField || ThunkRelocCount > MaxSerializedField) {
+      return false;
+    }
+    const uint32_t EntryPointCount = static_cast<uint32_t>(CompiledCode.EntryPoints.size());
+    const uint32_t TouchedGuestPagesCount = DecodedBlockInfo ? static_cast<uint32_t>(DecodedBlockInfo->CodePages.size()) : 0;
 
     const size_t HeaderOffset = 0;
     const size_t HostCodeOffset = HeaderOffset + sizeof(BlobFixedHeader);
+    const size_t EntryPointsBytes = static_cast<size_t>(EntryPointCount) * sizeof(BlobEntryPoint);
+    const size_t SmallRelocsBytes = static_cast<size_t>(SmallRelocCount) * sizeof(BlobSmallRelocation);
+    const size_t ThunkRelocsBytes = static_cast<size_t>(ThunkRelocCount) * sizeof(BlobThunkRelocation);
+    const size_t GuestPagesBytes = static_cast<size_t>(TouchedGuestPagesCount) * sizeof(int64_t);
+    constexpr size_t MaxSize = std::numeric_limits<size_t>::max();
+    if (CompiledCode.Size > MaxSize - HostCodeOffset ||
+        EntryPointsBytes > MaxSize - HostCodeOffset - CompiledCode.Size ||
+        SmallRelocsBytes > MaxSize - HostCodeOffset - CompiledCode.Size - EntryPointsBytes ||
+        ThunkRelocsBytes > MaxSize - HostCodeOffset - CompiledCode.Size - EntryPointsBytes - SmallRelocsBytes ||
+        GuestPagesBytes > MaxSize - HostCodeOffset - CompiledCode.Size - EntryPointsBytes - SmallRelocsBytes - ThunkRelocsBytes) {
+      return false;
+    }
     const size_t EntryPointsOffset = HostCodeOffset + CompiledCode.Size;
-    const size_t SmallRelocsOffset = EntryPointsOffset + EntryPointCount * sizeof(BlobEntryPoint);
-    const size_t ThunkRelocsOffset = SmallRelocsOffset + SmallRelocCount * sizeof(BlobSmallRelocation);
-    const size_t TouchedGuestPagesOffset = ThunkRelocsOffset + ThunkRelocCount * sizeof(BlobThunkRelocation);
-    const size_t GuestCodeOffset = TouchedGuestPagesOffset + TouchedGuestPagesCount * sizeof(int64_t);
+    const size_t SmallRelocsOffset = EntryPointsOffset + EntryPointsBytes;
+    const size_t ThunkRelocsOffset = SmallRelocsOffset + SmallRelocsBytes;
+    const size_t TouchedGuestPagesOffset = ThunkRelocsOffset + ThunkRelocsBytes;
+    const size_t GuestCodeOffset = TouchedGuestPagesOffset + GuestPagesBytes;
+    if (GuestCode.size() > MaxSize - GuestCodeOffset ||
+        GuestCodeOffset + GuestCode.size() > MaxSerializedField) {
+      return false;
+    }
     const size_t TotalSize = GuestCodeOffset + GuestCode.size();
 
     // we'll copy everything into here and pass it to the Writer, then return to caller quickly
