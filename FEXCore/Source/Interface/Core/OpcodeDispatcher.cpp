@@ -3886,7 +3886,7 @@ void OpDispatchBuilder::CMPXCHGOp(OpcodeArgs) {
     if (GPRSize == OpSize::i64Bit && Size == OpSize::i32Bit) {
       Src2Lower = _Bfe(GPRSize, IR::OpSizeAsBits(Size), 0, Src2);
     }
-    Ref DestResult = Trivial ? Src2 : NZCVSelect(OpSize::i64Bit, CondClass::EQ, Src2Lower, Src1);
+    Ref DestResult = Trivial ? Src2Lower : NZCVSelect(OpSize::i64Bit, CondClass::EQ, Src2Lower, Src1);
 
     // Store in to GPR Dest
     if (GPRSize == OpSize::i64Bit && Size == OpSize::i32Bit) {
