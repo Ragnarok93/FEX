@@ -212,9 +212,13 @@ namespace DiskCache {
         continue;
       }
       if (FOZKey->bytes[39] != 0xFF) {
-        uint64_t Key;
-        std::from_chars(reinterpret_cast<const char*>(FOZKey->bytes), reinterpret_cast<const char*>(&FOZKey->bytes[16]), Key, 16);
-        if (IndexBlobPayload->hash != Key) {
+        uint64_t Key {};
+        const char* KeyBegin = reinterpret_cast<const char*>(FOZKey->bytes);
+        const char* KeyEnd = reinterpret_cast<const char*>(&FOZKey->bytes[16]);
+        const auto ParseResult = std::from_chars(KeyBegin, KeyEnd, Key, 16);
+        // Cache files persist across runs and can be truncated or corrupted. Never use
+        // an uninitialized hash when a malformed key fails integer parsing.
+        if (ParseResult.ec != std::errc {} || ParseResult.ptr != KeyEnd || IndexBlobPayload->hash != Key) {
           continue;
         }
         CacheIndex.insert({IndexBlobPayload->hash, {this, IndexBlobPayload->cache_db_file_offset, IndexBlobPayload->size}});
@@ -253,9 +257,14 @@ namespace DiskCache {
     if (Blob.size() > std::numeric_limits<uint32_t>::max()) {
       return false;
     }
-    uint64_t Hash;
+    uint64_t Hash {};
     if (Key.bytes[39] != 0xFF) {
-      std::from_chars(reinterpret_cast<const char*>(Key.bytes), reinterpret_cast<const char*>(&Key.bytes[16]), Hash, 16);
+      const char* KeyBegin = reinterpret_cast<const char*>(Key.bytes);
+      const char* KeyEnd = reinterpret_cast<const char*>(&Key.bytes[16]);
+      const auto ParseResult = std::from_chars(KeyBegin, KeyEnd, Hash, 16);
+      if (ParseResult.ec != std::errc {} || ParseResult.ptr != KeyEnd) {
+        return false;
+      }
     } else {
       Hash = ~0;
     }
