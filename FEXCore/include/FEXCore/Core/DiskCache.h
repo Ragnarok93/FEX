@@ -153,7 +153,7 @@ namespace DiskCache {
   class IndexedDB {
   public:
     bool Open(const fextl::string& CacheDBName, bool ReadOnly);
-    void PopulateIndex(Index& CacheIndex, bool& FoundMetadata);
+    void PopulateIndex(Index& CacheIndex, bool& FoundMetadata, std::span<const uint8_t> ExpectedMetadata, bool ValidateMetadata);
     bool ReadCacheBlob(uint64_t Offset, std::span<uint8_t> OutBlob);
     bool StoreCacheBlob(const MesaFOZ::foz_payload_key& Key, std::span<const uint8_t> Blob, Index& CacheIndex, std::mutex& IndexMutex);
 
@@ -188,7 +188,7 @@ namespace DiskCache {
     }
 
   private:
-    bool OpenCacheDB(const fextl::string& CacheDBName, bool ReadOnly);
+    bool OpenCacheDB(const fextl::string& CacheDBName, bool ReadOnly, std::span<const uint8_t> ExpectedMetadata);
     uint64_t MakeBlobKey(const uint64_t ModuleOffset);
 
     FEXCore::Context::ContextImpl* CTX;
