@@ -480,11 +480,14 @@ namespace DiskCache {
     }
     // LogMan::Msg::IFmt("hash ok! length {:d}", Header.GuestSize);
 
-    // this seems to be a full hit, lastly, check the entry is big enough to have everything (except maybe GuestCode)
-    uint32_t SizeNeeded = sizeof(Header) + Header.HostSize + Header.EntryPointCount * sizeof(BlobEntryPoint);
-    SizeNeeded += Header.SmallRelocCount * sizeof(BlobSmallRelocation) + Header.ThunkRelocCount * sizeof(BlobThunkRelocation) +
-                  Header.TouchedGuestPagesCount * sizeof(int64_t);
-    if (Entry.Size < SizeNeeded) {
+    // Validate the serialized lengths using 64-bit arithmetic. The cache is persistent
+    // input, so a corrupt header must not wrap SizeNeeded and produce out-of-bounds spans.
+    const uint64_t SizeNeeded = sizeof(Header) + static_cast<uint64_t>(Header.HostSize) +
+                                static_cast<uint64_t>(Header.EntryPointCount) * sizeof(BlobEntryPoint) +
+                                static_cast<uint64_t>(Header.SmallRelocCount) * sizeof(BlobSmallRelocation) +
+                                static_cast<uint64_t>(Header.ThunkRelocCount) * sizeof(BlobThunkRelocation) +
+                                static_cast<uint64_t>(Header.TouchedGuestPagesCount) * sizeof(int64_t);
+    if (SizeNeeded > Entry.Size) {
       return std::nullopt;
     }
 
