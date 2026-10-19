@@ -240,8 +240,13 @@ public:
     struct stat st {};
     return fstat(Handle, &st) == 0 ? static_cast<ssize_t>(st.st_size) : -1;
 #else
-    LARGE_INTEGER FileSize {};
-    return GetFileSizeEx(Handle, &FileSize) ? static_cast<ssize_t>(FileSize.QuadPart) : -1;
+    DWORD High {};
+    SetLastError(NO_ERROR);
+    const DWORD Low = GetFileSize(Handle, &High);
+    if (Low == INVALID_FILE_SIZE && GetLastError() != NO_ERROR) {
+      return -1;
+    }
+    return static_cast<ssize_t>((static_cast<uint64_t>(High) << 32) | Low);
 #endif
   }
 
