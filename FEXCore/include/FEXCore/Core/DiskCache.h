@@ -129,6 +129,9 @@ namespace DiskCache {
       return FD ? FD->GetHandle() : (File::File::FileHandleType)-1;
     }
     ssize_t Size();
+    bool Truncate(uint64_t NewSize) {
+      return FD && FD->Truncate(NewSize);
+    }
     bool ReadAll(fextl::vector<uint8_t>& Out); // from first blob
     bool ReadBlob(uint64_t Offset, std::span<uint8_t> OutBlob);
     bool WriteBlob(const MesaFOZ::foz_payload_key& Key, std::span<const std::span<const uint8_t>> BlobChunks, uint64_t& OutBlobOffset);
