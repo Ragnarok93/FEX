@@ -510,4 +510,24 @@ void Value<T>::GetListIfExists(FEXCore::Config::ConfigOption Option, StringArray
   }
 }
 template void Value<StringArrayType>::GetListIfExists(FEXCore::Config::ConfigOption Option, StringArrayType* List);
+#define CONFIG_AFFECTSCODEGEN
+#include <FEXCore/Config/ConfigOptions.inl>
+
+fextl::string SerializeForCache() {
+  fextl::string Serialized {};
+  auto Append = [&Serialized](ConfigOption Option, auto Value) {
+    Serialized.append(fextl::fmt::format("{}\0{}\0{}\0", FEXCore::ToUnderlying(Option), FEXCore::ToUnderlying(Option), Value));
+  };
+  const auto SerializeValue = [&Append]<typename T, ConfigOption Option>(auto ConfigVal, const auto) {
+    if (!Config_AffectsCodeGen[FEXCore::ToUnderlying(Option)]) return;
+    Append(Option, ConfigVal());
+  };
+#define OPT_BASE(type, group, enum, json, default) SerializeValue.template operator()<type, CONFIG_##enum>(FEXCore::Config::Get_##enum(), default);
+#define OPT_STR(group, enum, json, default) SerializeValue.template operator()<fextl::string, CONFIG_##enum>(FEXCore::Config::Get_##enum(), default);
+#define OPT_STRARRAY(group, enum, json, default)
+#define OPT_STRENUM(group, enum, json, default)
+#include <FEXCore/Config/ConfigValues.inl>
+  return Serialized;
+}
+
 } // namespace FEXCore::Config

@@ -121,6 +121,7 @@ FEX_DEFAULT_VISIBILITY void SetCacheDirectory(const std::string_view Path);
 FEX_DEFAULT_VISIBILITY const fextl::string& GetDataDirectory(bool Global = false);
 FEX_DEFAULT_VISIBILITY const fextl::string& GetConfigDirectory(bool Global);
 FEX_DEFAULT_VISIBILITY const fextl::string& GetConfigFileLocation(bool Global = false);
+FEX_DEFAULT_VISIBILITY fextl::string SerializeForCache();
 FEX_DEFAULT_VISIBILITY fextl::string GetApplicationConfig(const std::string_view Program, bool Global);
 FEX_DEFAULT_VISIBILITY const fextl::string& GetCacheDirectory();
 

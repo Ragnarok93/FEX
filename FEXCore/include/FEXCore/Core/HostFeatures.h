@@ -6,6 +6,25 @@
 
 namespace FEXCore {
 struct HostFeatures {
+  [[nodiscard]] uint64_t HashForCaching() const {
+    uint64_t Hash = 14695981039346656037ULL;
+    auto Mix = [&Hash](uint64_t Value) {
+      for (unsigned i = 0; i < 8; ++i) {
+        Hash ^= static_cast<uint8_t>(Value >> (i * 8));
+        Hash *= 1099511628211ULL;
+      }
+    };
+    Mix(DCacheLineSize); Mix(ICacheLineSize);
+    Mix(SupportsCacheMaintenanceOps); Mix(SupportsAES); Mix(SupportsCRC); Mix(SupportsCLZERO);
+    Mix(SupportsAtomics); Mix(SupportsRCPC); Mix(SupportsTSOImm9); Mix(SupportsRAND);
+    Mix(SupportsAVX); Mix(SupportsSVE128); Mix(SupportsSVE256); Mix(SupportsSHA);
+    Mix(SupportsPMULL_128Bit); Mix(SupportsCSSC); Mix(SupportsFCMA); Mix(SupportsFlagM);
+    Mix(SupportsFlagM2); Mix(SupportsRPRES); Mix(SupportsPreserveAllABI); Mix(SupportsAES256);
+    Mix(SupportsSVEBitPerm); Mix(SupportsCPUIndexInTPIDRRO); Mix(SupportsFRINTTS); Mix(SupportsECV);
+    Mix(SupportsWFXT); Mix(Supports3DNow); Mix(SupportsSSE4a); Mix(SupportsMOPS);
+    Mix(SupportsAFP); Mix(SupportsFloatExceptions); Mix(IsInstCountCI);
+    return Hash;
+  }
   /**
    * @brief Backend features that change how codegen is generated from IR
    *

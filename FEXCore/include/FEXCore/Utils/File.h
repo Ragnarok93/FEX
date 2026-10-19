@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #else
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -43,7 +44,8 @@ public:
 
   File() = default;
 
-  File(const char* Filepath, FileModes Modes) {
+  File(const char* Filepath, FileModes Modes, bool Seekable = true)
+    : Seekable {Seekable} {
 #ifndef _WIN32
     auto Disp = TranslateModes(Modes);
     Handle = open(Filepath, Disp, DEFAULT_USER_PERMS);
@@ -62,6 +64,7 @@ public:
     }
     IsValidHandle = Handle != INVALID_HANDLE_VALUE;
 #endif
+    ShouldClose = IsValidHandle;
   }
 
   /**
@@ -109,6 +112,40 @@ public:
     }
     // Some error, match Linux side.
     return -1;
+#endif
+  }
+
+  ssize_t PRead(void* Buffer, size_t Bytes, uint64_t Offset) {
+    if (Seekable) {
+      LOGMAN_THROW_A_FMT(false, "Can't use positioned reads on a seekable file!");
+      return -1;
+    }
+#ifndef _WIN32
+    return pread(Handle, Buffer, Bytes, Offset);
+#else
+    DWORD BytesRead {};
+    OVERLAPPED Overlapped {};
+    Overlapped.Offset = static_cast<DWORD>(Offset);
+    Overlapped.OffsetHigh = static_cast<DWORD>(Offset >> 32);
+    auto Result = ReadFile(Handle, Buffer, Bytes, &BytesRead, &Overlapped);
+    return Result ? static_cast<ssize_t>(BytesRead) : -1;
+#endif
+  }
+
+  ssize_t PWrite(const void* Buffer, size_t Bytes, uint64_t Offset) {
+    if (Seekable) {
+      LOGMAN_THROW_A_FMT(false, "Can't use positioned writes on a seekable file!");
+      return -1;
+    }
+#ifndef _WIN32
+    return pwrite(Handle, Buffer, Bytes, Offset);
+#else
+    DWORD BytesWritten {};
+    OVERLAPPED Overlapped {};
+    Overlapped.Offset = static_cast<DWORD>(Offset);
+    Overlapped.OffsetHigh = static_cast<DWORD>(Offset >> 32);
+    auto Result = WriteFile(Handle, Buffer, Bytes, &BytesWritten, &Overlapped);
+    return Result ? static_cast<ssize_t>(BytesWritten) : -1;
 #endif
   }
 
@@ -200,6 +237,16 @@ public:
 #endif
   }
 
+  ssize_t Size() {
+#ifndef _WIN32
+    struct stat st {};
+    return fstat(Handle, &st) == 0 ? static_cast<ssize_t>(st.st_size) : -1;
+#else
+    LARGE_INTEGER FileSize {};
+    return GetFileSizeEx(Handle, &FileSize) ? static_cast<ssize_t>(FileSize.QuadPart) : -1;
+#endif
+  }
+
   /**
    * @brief Seek the file pointer location.
    *
@@ -259,16 +306,20 @@ private:
   bool IsValidHandle {};
 
   FileHandleType Handle {};
+  bool Seekable = true;
   bool Locked = false;
 #ifndef _WIN32
   static constexpr int DEFAULT_USER_PERMS = S_IRWXU | S_IRWXG | S_IRWXO;
 
   static uint32_t TranslateModes(FileModes Modes) {
+    const bool IsRead = (Modes & FileModes::READ) == FileModes::READ;
+    const bool IsWrite = (Modes & FileModes::WRITE) == FileModes::WRITE;
     uint32_t Mode {};
-    if ((Modes & FileModes::READ) == FileModes::READ) {
+    if (IsRead && IsWrite) {
+      Mode |= O_RDWR;
+    } else if (IsRead) {
       Mode |= O_RDONLY;
-    }
-    if ((Modes & FileModes::WRITE) == FileModes::WRITE) {
+    } else if (IsWrite) {
       Mode |= O_WRONLY;
     }
     if ((Modes & FileModes::CREATE) == FileModes::CREATE) {
