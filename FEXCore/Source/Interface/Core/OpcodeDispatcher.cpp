@@ -653,7 +653,7 @@ void OpDispatchBuilder::CMOVOp(OpcodeArgs) {
   Ref Dest = LoadSourceGPR_WithOpSize(Op, Op->Dest, GPRSize, Op->Flags);
   Ref Src {}, SrcCond {};
   if (Op->Src[0].IsGPR()) {
-    Src = LoadSourceGPR_WithOpSize(Op, Op->Src[0], SrcSize, Op->Flags, {.AllowUpperGarbage = true});
+    Src = LoadSourceGPR_WithOpSize(Op, Op->Src[0], GPRSize, Op->Flags);
   } else {
     Src = LoadSourceGPR(Op, Op->Src[0], Op->Flags);
   }
@@ -4934,7 +4934,7 @@ void OpDispatchBuilder::CRC32(OpcodeArgs) {
   // Incoming memory is 8, 16, 32, or 64
   Ref Src {};
   if (Op->Src[0].IsGPR()) {
-    Src = LoadSourceGPR_WithOpSize(Op, Op->Src[0], GPRSize, Op->Flags);
+    Src = LoadSourceGPR_WithOpSize(Op, Op->Src[0], SrcSize, Op->Flags, {.AllowUpperGarbage = true});
   } else {
     Src = LoadSourceGPR(Op, Op->Src[0], Op->Flags, {.Align = OpSize::i8Bit});
   }
