@@ -510,9 +510,6 @@ void Value<T>::GetListIfExists(FEXCore::Config::ConfigOption Option, StringArray
   }
 }
 template void Value<StringArrayType>::GetListIfExists(FEXCore::Config::ConfigOption Option, StringArrayType* List);
-#define CONFIG_AFFECTSCODEGEN
-#include <FEXCore/Config/ConfigOptions.inl>
-
 fextl::string SerializeForCache() {
   fextl::string Serialized {};
   auto Append = [&Serialized](ConfigOption Option, auto Value) {
@@ -522,7 +519,16 @@ fextl::string SerializeForCache() {
     Serialized.push_back('\0');
   };
   const auto SerializeValue = [&Append]<typename T, ConfigOption Option>(auto ConfigVal, const auto) {
-    if (!Config_AffectsCodeGen[FEXCore::ToUnderlying(Option)]) return;
+    // Serialize the full option set, except cache controls themselves. The
+    // 2605 config generator doesn't expose the newer codegen-option metadata array.
+    if constexpr (Option == ConfigOption::CONFIG_DISKCACHE ||
+                  Option == ConfigOption::CONFIG_DISKCACHEFILEMAPPING ||
+                  Option == ConfigOption::CONFIG_DISKCACHEMEMORYBUFFERMB ||
+                  Option == ConfigOption::CONFIG_DISKCACHERELOCATIONFILTER ||
+                  Option == ConfigOption::CONFIG_DISKCACHEPATH ||
+                  Option == ConfigOption::CONFIG_DISKCACHERODBNAMES) {
+      return;
+    }
     Append(Option, ConfigVal());
   };
 #define OPT_BASE(type, group, enum, json, default) SerializeValue.template operator()<type, CONFIG_##enum>(FEXCore::Config::Get_##enum(), default);
