@@ -474,7 +474,11 @@ namespace DiskCache {
     if (RangeInfo.Size == 0 || RangeInfo.Base > GuestRIP) {
       return std::nullopt;
     }
-    uint64_t Available = RangeInfo.Base + RangeInfo.Size - GuestRIP;
+    const uint64_t GuestOffsetInRange = GuestRIP - RangeInfo.Base;
+    if (GuestOffsetInRange >= RangeInfo.Size) {
+      return std::nullopt;
+    }
+    const uint64_t Available = RangeInfo.Size - GuestOffsetInRange;
     if (Available < Header.GuestSize) {
       return std::nullopt;
     }
