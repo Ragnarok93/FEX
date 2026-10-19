@@ -5,6 +5,8 @@
 #include <FEXCore/Utils/EnumOperators.h>
 
 #include <chrono>
+#include <mutex>
+#include <limits>
 #include <thread>
 
 #ifndef _WIN32
@@ -54,13 +56,13 @@ public:
     auto Disp = TranslateModes(Modes);
     if (Disp.CreationFlag == OPEN_ALWAYS && Disp.TruncateOnExist) {
       // If Open + Truncate then try to open with truncate behaviour first.
-      Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, TRUNCATE_EXISTING, (FILE_ATTRIBUTE_NORMAL | (Seekable ? 0 : FILE_FLAG_OVERLAPPED)), nullptr);
+      Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
       if (Handle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND) {
         // File didn't exist, just open.
-        Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, CREATE_NEW, (FILE_ATTRIBUTE_NORMAL | (Seekable ? 0 : FILE_FLAG_OVERLAPPED)), nullptr);
+        Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
       }
     } else {
-      Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, Disp.CreationFlag, (FILE_ATTRIBUTE_NORMAL | (Seekable ? 0 : FILE_FLAG_OVERLAPPED)), nullptr);
+      Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, Disp.CreationFlag, FILE_ATTRIBUTE_NORMAL, nullptr);
     }
     IsValidHandle = Handle != INVALID_HANDLE_VALUE;
 #endif
@@ -122,14 +124,16 @@ public:
 #ifndef _WIN32
     return pread(Handle, Buffer, Bytes, Offset);
 #else
-    DWORD BytesRead {};
-    OVERLAPPED Overlapped {};
-    Overlapped.Offset = static_cast<DWORD>(Offset);
-    Overlapped.OffsetHigh = static_cast<DWORD>(Offset >> 32);
-    auto Result = ReadFile(Handle, Buffer, Bytes, &BytesRead, &Overlapped);
-    if (!Result && GetLastError() == ERROR_IO_PENDING) {
-      Result = GetOverlappedResult(Handle, &Overlapped, &BytesRead, TRUE);
+    if (Bytes > std::numeric_limits<DWORD>::max()) {
+      return -1;
     }
+    std::lock_guard Guard(PositionedIOMutex);
+    LARGE_INTEGER Distance {.QuadPart = static_cast<LONGLONG>(Offset)};
+    if (!SetFilePointerEx(Handle, Distance, nullptr, FILE_BEGIN)) {
+      return -1;
+    }
+    DWORD BytesRead {};
+    auto Result = ReadFile(Handle, Buffer, static_cast<DWORD>(Bytes), &BytesRead, nullptr);
     return Result ? static_cast<ssize_t>(BytesRead) : -1;
 #endif
   }
@@ -141,14 +145,16 @@ public:
 #ifndef _WIN32
     return pwrite(Handle, Buffer, Bytes, Offset);
 #else
-    DWORD BytesWritten {};
-    OVERLAPPED Overlapped {};
-    Overlapped.Offset = static_cast<DWORD>(Offset);
-    Overlapped.OffsetHigh = static_cast<DWORD>(Offset >> 32);
-    auto Result = WriteFile(Handle, Buffer, Bytes, &BytesWritten, &Overlapped);
-    if (!Result && GetLastError() == ERROR_IO_PENDING) {
-      Result = GetOverlappedResult(Handle, &Overlapped, &BytesWritten, TRUE);
+    if (Bytes > std::numeric_limits<DWORD>::max()) {
+      return -1;
     }
+    std::lock_guard Guard(PositionedIOMutex);
+    LARGE_INTEGER Distance {.QuadPart = static_cast<LONGLONG>(Offset)};
+    if (!SetFilePointerEx(Handle, Distance, nullptr, FILE_BEGIN)) {
+      return -1;
+    }
+    DWORD BytesWritten {};
+    auto Result = WriteFile(Handle, Buffer, static_cast<DWORD>(Bytes), &BytesWritten, nullptr);
     return Result ? static_cast<ssize_t>(BytesWritten) : -1;
 #endif
   }
@@ -246,8 +252,9 @@ public:
     struct stat st {};
     return fstat(Handle, &st) == 0 ? static_cast<ssize_t>(st.st_size) : -1;
 #else
-    LARGE_INTEGER FileSize {};
-    return GetFileSizeEx(Handle, &FileSize) ? static_cast<ssize_t>(FileSize.QuadPart) : -1;
+    std::lock_guard Guard(PositionedIOMutex);
+    LARGE_INTEGER NewPointer;
+    return SetFilePointerEx(Handle, LARGE_INTEGER {.QuadPart = 0}, &NewPointer, FILE_END) ? static_cast<ssize_t>(NewPointer.QuadPart) : -1;
 #endif
   }
 
@@ -311,6 +318,9 @@ private:
 
   FileHandleType Handle {};
   bool Seekable = true;
+#ifdef _WIN32
+  std::mutex PositionedIOMutex;
+#endif
   bool Locked = false;
 #ifndef _WIN32
   static constexpr int DEFAULT_USER_PERMS = S_IRWXU | S_IRWXG | S_IRWXO;
