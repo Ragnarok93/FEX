@@ -267,6 +267,9 @@ public:
     }
     return ftruncate(Handle, static_cast<off_t>(NewSize)) == 0;
 #else
+    if (NewSize > static_cast<uint64_t>(std::numeric_limits<LONGLONG>::max())) {
+      return false;
+    }
     std::lock_guard Guard(PositionedIOMutex);
     LARGE_INTEGER Distance {.QuadPart = static_cast<LONGLONG>(NewSize)};
     if (!SetFilePointerEx(Handle, Distance, nullptr, FILE_BEGIN)) {
