@@ -417,30 +417,40 @@ namespace DiskCache {
 
     fextl::string SerializedConfig = FEXCore::Config::SerializeForCache();
 
-    struct __attribute__((packed)) {
-      uint8_t FormatVersion;
-      uint8_t Is64BitMode;
-      uint64_t HostFeaturesHash;
-    } BucketHeader = {FormatVersion, CTX->Config.Is64BitMode, CTX->HostFeatures.HashForCaching()};
+    // Keep machine compatibility separate from process/code-generation identity, as in
+    // upstream 2610. This isolates cache generations by FEX cache format and host
+    // features, while 32/64-bit mode and serialized configuration select a DB inside
+    // that machine bucket. Existing single-hash cache directories remain untouched.
+    const auto HostFeatureHash = CTX->HostFeatures.HashForCaching();
 
-    fextl::vector<uint8_t> BucketBytes;
-    BucketBytes.resize(sizeof(BucketHeader) + SerializedConfig.size());
-    memcpy(BucketBytes.data(), &BucketHeader, sizeof(BucketHeader));
-    memcpy(BucketBytes.data() + sizeof(BucketHeader), SerializedConfig.data(), SerializedConfig.size());
-    BucketHash = XXH3_128bits(BucketBytes.data(), BucketBytes.size());
+    struct __attribute__((packed)) {
+      uint16_t FormatVersion;
+      uint64_t HostFeaturesHash;
+    } MachineBucketData = {FormatVersion, HostFeatureHash.HostFeaturesHash};
+
+    fextl::vector<uint8_t> BucketBytes(sizeof(MachineBucketData) + 2 + SerializedConfig.size());
+    memcpy(BucketBytes.data(), &MachineBucketData, sizeof(MachineBucketData));
+    BucketBytes[sizeof(MachineBucketData)] = CTX->Config.Is64BitMode;
+    BucketBytes[sizeof(MachineBucketData) + 1] = FEXCore::ToUnderlying(HostFeatureHash.HostType);
+    memcpy(BucketBytes.data() + sizeof(MachineBucketData) + 2, SerializedConfig.data(), SerializedConfig.size());
+
+    const uint64_t MachineBucketHash = XXH3_64bits(BucketBytes.data(), sizeof(MachineBucketData));
+    const uint64_t ProcessBucketHash = XXH3_64bits(BucketBytes.data() + sizeof(MachineBucketData), 2 + SerializedConfig.size());
+    BucketHash.high64 = MachineBucketHash;
+    BucketHash.low64 = ProcessBucketHash;
 
     fextl::string BasePath = BasePathOverride();
     if (BasePath.empty()) {
       BasePath = FEXCore::Config::GetCacheDirectory() + "DiskCache/";
-      BasePath += fextl::fmt::format("{:016x}{:016x}", BucketHash.high64, BucketHash.low64) + "/";
     }
+    BasePath += fextl::fmt::format("{:016x}", MachineBucketHash) + "/";
     FHU::Filesystem::CreateDirectories(BasePath);
 
     if (!MapDiskCacheFiles) {
       FileMapper = nullptr;
     }
 
-    fextl::string RWDBBasePath = BasePath + "RWCacheDB";
+    fextl::string RWDBBasePath = BasePath + fextl::fmt::format("RWCacheDB_{:016x}", ProcessBucketHash);
     OpenCacheDB(RWDBBasePath, false);
 
     if (RWCacheDB && !FoundMetadata) {
