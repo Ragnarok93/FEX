@@ -21,6 +21,13 @@ WorkQueueThread::~WorkQueueThread() {
 }
 
 void WorkQueueThread::QueueWork(fextl::unique_ptr<WorkItem> Work) {
+  // Thread creation can fail on resource-constrained hosts. Don't strand queued work
+  // forever in that case; execute it synchronously when no worker exists.
+  if (!Thread) {
+    Work->Run();
+    return;
+  }
+
   {
     std::unique_lock lk {Mutex};
     Queue.push_back(std::move(Work));
