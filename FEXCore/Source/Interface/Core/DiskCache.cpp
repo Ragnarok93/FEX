@@ -135,7 +135,9 @@ namespace DiskCache {
     // Every record is append-only. If any component write fails, roll back the
     // incomplete record so a torn append cannot make later index records unreadable.
     auto RollbackAppend = [&]() {
-      FD->Truncate(static_cast<uint64_t>(FileSize));
+      if (!FD->Truncate(static_cast<uint64_t>(FileSize))) {
+        LogMan::Msg::EFmt("DiskCache: failed to roll back incomplete append to {}", FileName);
+      }
       return false;
     };
 
@@ -347,7 +349,9 @@ namespace DiskCache {
       // The cache payload is not reachable until its index record is committed.
       // Remove that orphan append if the index write fails, keeping both files in
       // sync and preserving capacity for subsequent stores.
-      CacheFOZ.Truncate(static_cast<uint64_t>(CacheBytes));
+      if (!CacheFOZ.Truncate(static_cast<uint64_t>(CacheBytes))) {
+        LogMan::Msg::EFmt("DiskCache: failed to roll back orphaned cache payload");
+      }
       CacheFOZ.Unlock();
       IndexFOZ.Unlock();
       return false;
