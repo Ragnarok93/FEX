@@ -54,13 +54,13 @@ public:
     auto Disp = TranslateModes(Modes);
     if (Disp.CreationFlag == OPEN_ALWAYS && Disp.TruncateOnExist) {
       // If Open + Truncate then try to open with truncate behaviour first.
-      Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, TRUNCATE_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+      Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, TRUNCATE_EXISTING, (FILE_ATTRIBUTE_NORMAL | (Seekable ? 0 : FILE_FLAG_OVERLAPPED)), nullptr);
       if (Handle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_FILE_NOT_FOUND) {
         // File didn't exist, just open.
-        Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, CREATE_NEW, (FILE_ATTRIBUTE_NORMAL | (Seekable ? 0 : FILE_FLAG_OVERLAPPED)), nullptr);
       }
     } else {
-      Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, Disp.CreationFlag, FILE_ATTRIBUTE_NORMAL, nullptr);
+      Handle = CreateFileA(Filepath, Disp.Access, DEFAULT_SHARE_MODE, nullptr, Disp.CreationFlag, (FILE_ATTRIBUTE_NORMAL | (Seekable ? 0 : FILE_FLAG_OVERLAPPED)), nullptr);
     }
     IsValidHandle = Handle != INVALID_HANDLE_VALUE;
 #endif
@@ -127,6 +127,9 @@ public:
     Overlapped.Offset = static_cast<DWORD>(Offset);
     Overlapped.OffsetHigh = static_cast<DWORD>(Offset >> 32);
     auto Result = ReadFile(Handle, Buffer, Bytes, &BytesRead, &Overlapped);
+    if (!Result && GetLastError() == ERROR_IO_PENDING) {
+      Result = GetOverlappedResult(Handle, &Overlapped, &BytesRead, TRUE);
+    }
     return Result ? static_cast<ssize_t>(BytesRead) : -1;
 #endif
   }
@@ -143,6 +146,9 @@ public:
     Overlapped.Offset = static_cast<DWORD>(Offset);
     Overlapped.OffsetHigh = static_cast<DWORD>(Offset >> 32);
     auto Result = WriteFile(Handle, Buffer, Bytes, &BytesWritten, &Overlapped);
+    if (!Result && GetLastError() == ERROR_IO_PENDING) {
+      Result = GetOverlappedResult(Handle, &Overlapped, &BytesWritten, TRUE);
+    }
     return Result ? static_cast<ssize_t>(BytesWritten) : -1;
 #endif
   }
