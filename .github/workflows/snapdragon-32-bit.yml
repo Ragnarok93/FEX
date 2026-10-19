@@ -74,35 +74,10 @@ jobs:
       - name: Run ARM emitter tests
         run: cmake --build build --target emitter_tests --parallel 2
 
-      - name: Run targeted 32-bit correctness regression tests
+      - name: Run targeted correctness regression tests
         run: |
           ctest --test-dir build --output-on-failure --timeout 302 \
-            -R '(crc32_8b|a32_lods|a32_rep_lods|vcvtps2ph_zeroing)\\.asm      - name: Record build metadata
-        if: always()
-        run: |
-          mkdir -p stage
-          {
-            echo "repository=$GITHUB_REPOSITORY"
-            echo "ref=$GITHUB_REF"
-            echo "commit=$GITHUB_SHA"
-            echo "runner_arch=$(uname -m)"
-            echo "compiler=$(clang++ --version | head -n 1)"
-            echo "target_flags=-march=armv8.2-a"
-            echo "thunks_built=false"
-            echo "guest_linux_tests_built=false"
-          } > stage/BUILD-METADATA.txt
-
-      - name: Upload staged runtime and metadata
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Snapdragon-32-Bit-${{ github.sha }}
-          path: |
-            stage/
-            build/compile_commands.json
-          if-no-files-found: warn
-          retention-days: 14
-
+            -R '(crc32_8b|a32_lods|a32_rep_lods|vcvtps2ph_zeroing)\\.asm$'
 
       - name: Record build metadata
         if: always()
