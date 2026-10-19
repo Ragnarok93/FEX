@@ -124,7 +124,7 @@ public:
 #ifndef _WIN32
     return pread(Handle, Buffer, Bytes, Offset);
 #else
-    if (Bytes > std::numeric_limits<DWORD>::max()) {
+    if (Bytes > 0xFFFFFFFFULL) {
       return -1;
     }
     std::lock_guard Guard(PositionedIOMutex);
@@ -145,7 +145,7 @@ public:
 #ifndef _WIN32
     return pwrite(Handle, Buffer, Bytes, Offset);
 #else
-    if (Bytes > std::numeric_limits<DWORD>::max()) {
+    if (Bytes > 0xFFFFFFFFULL) {
       return -1;
     }
     std::lock_guard Guard(PositionedIOMutex);
@@ -253,8 +253,9 @@ public:
     return fstat(Handle, &st) == 0 ? static_cast<ssize_t>(st.st_size) : -1;
 #else
     std::lock_guard Guard(PositionedIOMutex);
+    LARGE_INTEGER Distance {.QuadPart = 0};
     LARGE_INTEGER NewPointer;
-    return SetFilePointerEx(Handle, LARGE_INTEGER {.QuadPart = 0}, &NewPointer, FILE_END) ? static_cast<ssize_t>(NewPointer.QuadPart) : -1;
+    return SetFilePointerEx(Handle, Distance, &NewPointer, FILE_END) ? static_cast<ssize_t>(NewPointer.QuadPart) : -1;
 #endif
   }
 
