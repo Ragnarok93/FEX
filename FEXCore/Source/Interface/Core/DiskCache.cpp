@@ -114,6 +114,10 @@ namespace DiskCache {
   }
 
   bool FOZFile::WriteBlob(const MesaFOZ::foz_payload_key& Key, std::span<const std::span<const uint8_t>> BlobChunks, uint64_t& OutBlobOffset) {
+    if (ReadOnly || WritePoisoned || !FD) {
+      return false;
+    }
+
     // Fossilize stores payload sizes as uint32_t. Validate the complete payload before
     // appending anything, otherwise a truncated header can make the trailing record
     // unreadable after a large or overflowed write.
