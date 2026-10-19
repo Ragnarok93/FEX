@@ -47,6 +47,7 @@ enum Paths {
   PATH_CONFIG_FILE_LOCAL,
   PATH_CONFIG_FILE_GLOBAL,
   PATH_CONFIG_TELEMETRY_FOLDER,
+  PATH_CACHE_DIR,
   PATH_LAST,
 };
 static std::array<fextl::string, Paths::PATH_LAST> Paths;
@@ -61,6 +62,10 @@ void SetConfigDirectory(const std::string_view Path, bool Global) {
 
 void SetConfigFileLocation(const std::string_view Path, bool Global) {
   Paths[PATH_CONFIG_FILE_LOCAL + Global] = Path;
+}
+
+void SetCacheDirectory(const std::string_view Path) {
+  Paths[PATH_CACHE_DIR] = Path;
 }
 
 const fextl::string& GetTelemetryDirectory() {
@@ -88,6 +93,10 @@ const fextl::string& GetConfigDirectory(bool Global) {
 
 const fextl::string& GetConfigFileLocation(bool Global) {
   return Paths[PATH_CONFIG_FILE_LOCAL + Global];
+}
+
+const fextl::string& GetCacheDirectory() {
+  return Paths[PATH_CACHE_DIR];
 }
 
 fextl::string GetApplicationConfig(const std::string_view Program, bool Global) {
