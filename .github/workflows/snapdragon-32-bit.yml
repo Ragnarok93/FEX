@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - Snapdragon-32-Bit
+      - work/sd865-disk-cache-backport
   workflow_dispatch:
 
 permissions:
