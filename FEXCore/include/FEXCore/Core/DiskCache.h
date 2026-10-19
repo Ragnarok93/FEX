@@ -192,10 +192,11 @@ namespace DiskCache {
     bool FoundMetadata = false;
     struct CacheStoreWorkItem;
 
-    // the Writer holds references to all this stuff above and needs to be last
-    fextl::unique_ptr<WorkQueueThread> Writer;
     std::atomic<uint64_t> PendingWriteBufferBytes {};
     uint64_t MaxWriteBufferBytes = 0;
+
+    // The Writer holds references to all the fields above and must be destroyed first.
+    fextl::unique_ptr<WorkQueueThread> Writer;
 
     FEX_CONFIG_OPT(EnableDiskCache, DISKCACHE);
     FEX_CONFIG_OPT(MapDiskCacheFiles, DISKCACHEFILEMAPPING);
