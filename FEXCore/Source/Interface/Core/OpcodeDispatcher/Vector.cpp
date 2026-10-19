@@ -3732,9 +3732,9 @@ void OpDispatchBuilder::PI2FWOp(OpcodeArgs) {
 
   const auto Size = OpSizeFromDst(Op);
 
-  // Truncate the 32-bit integers to 16-bit, saturating values outside the
-  // signed 16-bit range before sign-extending them back to 32-bit.
-  Src = _VSQXTN(Size, OpSize::i32Bit, Src);
+  // We now need to transpose the lower 16-bits of each element together
+  // Only needing to move the upper element down in this case
+  Src = _VUnZip(Size, OpSize::i16Bit, Src, Src);
 
   // Now we need to sign extend the 16bit value to 32-bit
   Src = _VSXTL(Size, OpSize::i16Bit, Src);
@@ -3753,9 +3753,9 @@ void OpDispatchBuilder::PF2IWOp(OpcodeArgs) {
   // Float to int32_t
   Src = _Vector_FToZS(Size, OpSize::i32Bit, Src);
 
-  // We now need to transpose the lower 16-bits of each element together
-  // Only needing to move the upper element down in this case
-  Src = _VUnZip(Size, OpSize::i16Bit, Src, Src);
+  // Truncate the 32-bit integers to 16-bit, saturating values outside the
+  // signed 16-bit range before sign-extending them back to 32-bit.
+  Src = _VSQXTN(Size, OpSize::i32Bit, Src);
 
   // Now we need to sign extend the 16bit value to 32-bit
   Src = _VSXTL(Size, OpSize::i16Bit, Src);
