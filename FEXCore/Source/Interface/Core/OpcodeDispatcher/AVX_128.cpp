@@ -2295,7 +2295,7 @@ void OpDispatchBuilder::AVX128_VCVTPS2PH(OpcodeArgs) {
 
   // We need to eliminate upper junk if we're storing into a register with
   // a 256-bit source (VCVTPS2PH's destination for registers is an XMM).
-  if (Op->Src[0].IsGPR() && SrcSize == OpSize::i256Bit) {
+  if (Op->Dest.IsGPR()) {
     Result = AVX128_Zext(Result.Low);
   }
 
