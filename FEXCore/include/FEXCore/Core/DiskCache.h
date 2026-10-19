@@ -192,7 +192,7 @@ namespace DiskCache {
     uint64_t MakeBlobKey(const uint64_t ModuleOffset);
 
     FEXCore::Context::ContextImpl* CTX;
-    static const uint8_t FormatVersion = 1;
+    static const uint16_t FormatVersion = 1;
     XXH128_hash_t BucketHash;
     fextl::vector<fextl::unique_ptr<IndexedDB>> ROCacheDBs;
     fextl::unique_ptr<IndexedDB> RWCacheDB;
