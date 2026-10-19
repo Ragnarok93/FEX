@@ -566,19 +566,23 @@ DEF_OP(Vector_F64ToI32) {
     // If this precision issue is necessary then we can add an option for it in the future.
 
     ///< Round float to integral depending on rounding mode.
+    ///< Skip TowardsZero as fcvtzs below already truncates toward zero on its own.
+    auto CVTReg = Dst.Q();
     switch (Round) {
     case IR::RoundMode::Nearest: frintn(ARMEmitter::SubRegSize::i64Bit, Dst.Q(), Vector.Q()); break;
     case IR::RoundMode::NegInfinity: frintm(ARMEmitter::SubRegSize::i64Bit, Dst.Q(), Vector.Q()); break;
     case IR::RoundMode::PosInfinity: frintp(ARMEmitter::SubRegSize::i64Bit, Dst.Q(), Vector.Q()); break;
-    case IR::RoundMode::TowardsZero: frintz(ARMEmitter::SubRegSize::i64Bit, Dst.Q(), Vector.Q()); break;
+    case IR::RoundMode::TowardsZero: CVTReg = Vector.Q(); break;
     case IR::RoundMode::Host: frinti(ARMEmitter::SubRegSize::i64Bit, Dst.Q(), Vector.Q()); break;
     }
 
-    // Now narrow from f64 to f32.
-    fcvtn(ARMEmitter::SubRegSize::i32Bit, Dst.Q(), Dst.Q());
+    ///< Convert f64 directly to i64.
+    fcvtzs(ARMEmitter::SubRegSize::i64Bit, Dst.Q(), CVTReg);
 
-    ///< Convert the two F32 integrals to real integers.
-    fcvtzs(ARMEmitter::SubRegSize::i32Bit, Dst.D(), Dst.D());
+    ///< Saturating narrow i64 -> i32.
+    ///< Values below INT32_MIN saturate to INT32_MIN (0x80000000), matching x86's
+    ///< integer-indefinite result. The caller fixes up positive overflow.
+    sqxtn(ARMEmitter::SubRegSize::i32Bit, Dst.D(), Dst.D());
   }
 }
 
