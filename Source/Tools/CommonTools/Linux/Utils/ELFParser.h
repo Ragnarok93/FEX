@@ -307,8 +307,12 @@ struct ELFParser {
     };
 
     const auto& StringHeader = shdrs->at(ehdr.e_shstrndx);
+    // Avoid allocating an attacker-controlled, arbitrarily large section-name table just
+    // to decide whether this executable has an optional build-id.
+    constexpr uint64_t MaxSectionNameTableSize = 16ULL * 1024ULL * 1024ULL;
     if (!IsInFile(StringHeader.sh_offset, StringHeader.sh_size) || StringHeader.sh_size == 0 ||
-        StringHeader.sh_size > std::numeric_limits<size_t>::max()) {
+        StringHeader.sh_size > std::numeric_limits<size_t>::max() ||
+        StringHeader.sh_size > std::numeric_limits<ssize_t>::max() || StringHeader.sh_size > MaxSectionNameTableSize) {
       return {};
     }
 
