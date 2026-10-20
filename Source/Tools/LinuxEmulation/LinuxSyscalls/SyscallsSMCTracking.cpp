@@ -17,6 +17,7 @@ $end_info$
 #include <sys/mman.h>
 #include <sys/personality.h>
 #include <sys/shm.h>
+#include <xxhash.h>
 
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/SignalDelegator.h"
@@ -205,6 +206,7 @@ FEXCore::HLE::ExecutableRangeInfo SyscallHandler::QueryGuestExecutableRange(FEXC
 struct ReadELFHeadersResult {
   fextl::vector<Elf64_Phdr> ProgramHeaders;
   fextl::robin_map<uint32_t, FEXCore::GuestRelocationType> Relocations;
+  fextl::vector<uint8_t> BuildID;
   bool HasCodeRelocations;
 };
 
@@ -230,7 +232,8 @@ static ReadELFHeadersResult ReadELFHeaders(int FD, std::span<std::byte> HeaderDa
 
   auto Relocations = Parser.PopulateRelocations();
   auto HasCodeRelocations = Parser.HasCodeRelocations();
-  return ReadELFHeadersResult {std::move(Parser.phdrs), std::move(Relocations), HasCodeRelocations};
+  auto BuildID = Parser.GetBuildID();
+  return ReadELFHeadersResult {std::move(Parser.phdrs), std::move(Relocations), std::move(BuildID), HasCodeRelocations};
 }
 
 static void LoadCodeCache(FEXCore::Core::InternalThreadState& Thread, FEXCore::ExecutableFileSectionInfo& Section, uint64_t CodeCacheConfigId) {
@@ -559,11 +562,12 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
       if ((prot & PROT_READ) && Inserted) {
         Resource->MappedFile = fextl::make_unique<FEXCore::ExecutableFileInfo>();
         Resource->MappedFile->Filename = fextl::string(Tmp, PathLength);
-        Resource->MappedFile->FileId = CTX->GetCodeCache().ComputeCodeMapId(Resource->MappedFile->Filename, fd);
 
-        // Read ELF headers if applicable and needed for code caching.
-        // For performance, skip ELF checks if we're not mapping the file header
+        // Read ELF headers for code caching or disk-cache identity when mapping a file header.
+        // Keep the legacy code-cache behavior separate from disk-cache-only operation.
         bool CheckForElfFile = (offset == 0) && EnableCodeCaching;
+        bool CheckForDiskCacheFile = (offset == 0) && EnableDiskCache;
+        Resource->MappedFile->FileId = CTX->GetCodeCache().ComputeCodeMapId(Resource->MappedFile->Filename, fd);
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
         CheckForElfFile = true;
 #endif
@@ -572,6 +576,9 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
           Resource->ProgramHeaders = std::move(ELFResult.ProgramHeaders);
           Resource->MappedFile->Relocations = std::move(ELFResult.Relocations);
           Resource->RequiresDelayedCacheLoad = ELFResult.HasCodeRelocations;
+          if (!ELFResult.BuildID.empty()) {
+            Resource->MappedFile->FileId ^= XXH3_64bits(ELFResult.BuildID.data(), ELFResult.BuildID.size());
+          }
 
           // GuestRelocationType::Skip indicates to FEXOfflineCompiler that
           // any blocks covered by the relocation may not be cached.
@@ -586,6 +593,11 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
 
           LOGMAN_THROW_A_FMT(Resource->ProgramHeaders.empty() || offset == 0, "Expected file offset 0 for the first mapping of an ELF "
                                                                               "file");
+        } else if (CheckForDiskCacheFile) {
+          auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length});
+          if (!ELFResult.BuildID.empty()) {
+            Resource->MappedFile->FileId ^= XXH3_64bits(ELFResult.BuildID.data(), ELFResult.BuildID.size());
+          }
         }
       } else if (ResourceIt->second.ProgramHeaders.empty()) {
         // Not an ELF file, so we don't need to distinguish between different base addresses
