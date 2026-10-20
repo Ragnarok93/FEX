@@ -7,8 +7,11 @@
 
 #include <elf.h>
 #include <fcntl.h>
+#include <cstring>
+#include <limits>
 #include <optional>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "Linux/Utils/ELFContainer.h"
 
@@ -286,6 +289,77 @@ struct ELFParser {
     }
 
     return false;
+  }
+
+  // Returns the GNU build-id when present. Missing or malformed note data is ignored.
+  fextl::vector<uint8_t> GetBuildID() {
+    if (fd == -1 || !EnsureSectionHeadersLoaded() || ehdr.e_shstrndx >= shdrs->size()) {
+      return {};
+    }
+
+    struct stat FileStat {};
+    if (fstat(fd, &FileStat) != 0 || FileStat.st_size < 0) {
+      return {};
+    }
+    const uint64_t FileSize = static_cast<uint64_t>(FileStat.st_size);
+    auto IsInFile = [FileSize](uint64_t Offset, uint64_t Size) {
+      return Offset <= FileSize && Size <= FileSize - Offset;
+    };
+
+    const auto& StringHeader = shdrs->at(ehdr.e_shstrndx);
+    if (!IsInFile(StringHeader.sh_offset, StringHeader.sh_size) || StringHeader.sh_size == 0 ||
+        StringHeader.sh_size > std::numeric_limits<size_t>::max()) {
+      return {};
+    }
+
+    fextl::vector<char> SectionNames(static_cast<size_t>(StringHeader.sh_size));
+    if (pread(fd, SectionNames.data(), SectionNames.size(), StringHeader.sh_offset) != static_cast<ssize_t>(SectionNames.size())) {
+      return {};
+    }
+
+    for (const auto& Section : *shdrs) {
+      if (Section.sh_type != SHT_NOTE || Section.sh_size < 16 || !IsInFile(Section.sh_offset, Section.sh_size) ||
+          Section.sh_name >= SectionNames.size()) {
+        continue;
+      }
+
+      const char* SectionName = SectionNames.data() + Section.sh_name;
+      const size_t RemainingNameBytes = SectionNames.size() - Section.sh_name;
+      const void* NameEnd = std::memchr(SectionName, '\0', RemainingNameBytes);
+      if (!NameEnd || std::string_view(SectionName, static_cast<const char*>(NameEnd) - SectionName) != ".note.gnu.build-id") {
+        continue;
+      }
+
+      struct NoteHeader {
+        uint32_t NameSize;
+        uint32_t DescSize;
+        uint32_t Type;
+      } Note {};
+      if (pread(fd, &Note, sizeof(Note), Section.sh_offset) != static_cast<ssize_t>(sizeof(Note))) {
+        continue;
+      }
+
+      const uint64_t AlignedNameSize = (static_cast<uint64_t>(Note.NameSize) + 3) & ~uint64_t {3};
+      const uint64_t NoteHeaderSize = sizeof(Note);
+      if (Note.Type != NT_GNU_BUILD_ID || Note.NameSize != 4 ||
+          NoteHeaderSize + AlignedNameSize > Section.sh_size ||
+          Note.DescSize > Section.sh_size - NoteHeaderSize - AlignedNameSize) {
+        continue;
+      }
+
+      char Name[4] {};
+      if (pread(fd, Name, sizeof(Name), Section.sh_offset + NoteHeaderSize) != static_cast<ssize_t>(sizeof(Name)) ||
+          std::memcmp(Name, "GNU\0", sizeof(Name)) != 0 || Note.DescSize == 0) {
+        continue;
+      }
+
+      fextl::vector<uint8_t> BuildID(Note.DescSize);
+      const uint64_t DescOffset = Section.sh_offset + NoteHeaderSize + AlignedNameSize;
+      if (pread(fd, BuildID.data(), BuildID.size(), DescOffset) == static_cast<ssize_t>(BuildID.size())) {
+        return BuildID;
+      }
+    }
+    return {};
   }
 
   /**
