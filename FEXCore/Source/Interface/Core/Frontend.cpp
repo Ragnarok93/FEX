@@ -8,6 +8,7 @@ $end_info$
 
 #include "Interface/Context/Context.h"
 #include "Interface/Core/Frontend.h"
+#include "Interface/Core/OpcodeDispatcher.h"
 #include "Interface/Core/X86Tables/X86Tables.h"
 #include "Interface/Core/LookupCache.h"
 
@@ -213,6 +214,8 @@ void Decoder::DecodeModRM_16(X86Tables::DecodedOperand* Operand, X86Tables::ModR
   Operand->Type = DecodedOperand::OpType::SIB;
   Operand->Data.SIB.Scale = 1;
   Operand->Data.SIB.Offset = Literal;
+  Operand->Data.SIB.PatchableDisp = false;
+  Operand->Data.SIB.DispOffset = 0;
 
   // Only called when ModRM.mod != 0b11
   struct Encodings {
@@ -288,6 +291,8 @@ void Decoder::DecodeModRM_64(X86Tables::DecodedOperand* Operand, X86Tables::ModR
     // SIB
     Operand->Type = DecodedOperand::OpType::SIB;
     Operand->Data.SIB.Scale = 1 << SIB.scale;
+    Operand->Data.SIB.PatchableDisp = false;
+    Operand->Data.SIB.DispOffset = 0;
 
     // The invalid encoding types are described at Table 1-12. "promoted nsigned is always non-zero"
     {
@@ -326,6 +331,8 @@ void Decoder::DecodeModRM_64(X86Tables::DecodedOperand* Operand, X86Tables::ModR
       auto [Literal, IsRelocation] = ReadData(4);
       Operand->Type = IsRelocation ? DecodedOperand::OpType::RIPRelativeRelocation : DecodedOperand::OpType::RIPRelative;
       Operand->Data.RIPLiteral.Value = Literal;
+      Operand->Data.RIPLiteral.PatchableDisp = false;
+      Operand->Data.RIPLiteral.DispOffset = 0;
     } else {
       // Register-direct addressing
       Operand->Type = DecodedOperand::OpType::GPRDirect;
@@ -341,6 +348,8 @@ void Decoder::DecodeModRM_64(X86Tables::DecodedOperand* Operand, X86Tables::ModR
     Operand->Type = IsRelocation ? DecodedOperand::OpType::GPRIndirectRelocation : DecodedOperand::OpType::GPRIndirect;
     Operand->Data.GPRIndirect.GPR = MapModRMToReg(DecodeInst->Flags & DecodeFlags::FLAG_REX_XGPR_B ? 1 : 0, ModRM.rm, false, false, false, false);
     Operand->Data.GPRIndirect.Displacement = Literal;
+    Operand->Data.GPRIndirect.PatchableDisp = false;
+    Operand->Data.GPRIndirect.DispOffset = 0;
   }
 }
 
@@ -1358,31 +1367,89 @@ const uint8_t* Decoder::AdjustAddrForSpecialRegion(const uint8_t* _InstStream, u
 }
 
 void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
-  if (!BlockInfo.Is64BitMode || LastFieldReadSize < 4 || !DecodeInst) {
-    return;
-  }
-
-  // MOV r32/r64, imm32/imm64 is common in JIT-generated code and its immediate
-  // can be safely reloaded from the live guest bytes on a cache hit.
-  if (DecodeInst->OPRaw < 0xB8 || DecodeInst->OPRaw > 0xBF) {
+  if (!BlockInfo.Is64BitMode || !DecodeInst || LastFieldReadSize < 4) {
     return;
   }
 
   FEXCore::X86Tables::DecodedOperand* LiteralToPatch = nullptr;
-  for (auto& Src : DecodeInst->Src) {
-    if (Src.IsLiteral()) {
-      LiteralToPatch = &Src;
-      break;
+  DataMaskType Type = DataMaskType::NONE;
+
+  // Keep the initial immediate set intentionally narrow: MOV reg,imm is safe to
+  // reload exactly without needing a second independently tracked instruction field.
+  if (DecodeInst->OPRaw >= 0xB8 && DecodeInst->OPRaw <= 0xBF) {
+    for (auto& Src : DecodeInst->Src) {
+      if (Src.IsLiteral()) {
+        LiteralToPatch = &Src;
+        break;
+      }
+    }
+    if (LiteralToPatch) {
+      Type = DataMaskType::MOV;
     }
   }
-  if (!LiteralToPatch || LiteralToPatch->Literal() == 0) {
-    return;
+
+  // Displacements can be patched only when their field is the last field read by
+  // the decoder. Instructions with a separate immediate are left byte-exact until
+  // the decoder tracks multiple fields per instruction.
+  if (Type == DataMaskType::NONE && LastFieldReadSize == 4 &&
+      (DecodeInst->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_DECODED_MODRM)) {
+    FEXCore::X86Tables::ModRMDecoded ModRM;
+    ModRM.Hex = DecodeInst->ModRM;
+    bool FoundLiteral = false;
+    FEXCore::X86Tables::DecodedOperand* OperandToPatch = nullptr;
+
+    for (auto& Src : DecodeInst->Src) {
+      if (Src.IsLiteral() || Src.IsLiteralPatchable()) {
+        FoundLiteral = true;
+        break;
+      }
+      if (Src.IsRIPRelative() || Src.IsGPRIndirect() || Src.IsSIB()) {
+        OperandToPatch = &Src;
+      }
+    }
+    if (DecodeInst->Dest.IsLiteral() || DecodeInst->Dest.IsLiteralPatchable()) {
+      FoundLiteral = true;
+    }
+    if (DecodeInst->Dest.IsRIPRelative() || DecodeInst->Dest.IsGPRIndirect() || DecodeInst->Dest.IsSIB()) {
+      OperandToPatch = &DecodeInst->Dest;
+    }
+
+    if (!FoundLiteral && OperandToPatch) {
+      const bool IsNOP = DecodeInst->TableInfo &&
+        DecodeInst->TableInfo->OpcodeDispatcher.OpDispatch == &IR::OpDispatchBuilder::NOPOp;
+      if (IsNOP) {
+        // NOP displacements are irrelevant to execution; hash masking can ignore them,
+        // but no runtime patch relocation is needed.
+        Type = DataMaskType::NOP;
+      } else if (OperandToPatch->IsRIPRelative()) {
+        Type = DataMaskType::DISP;
+        OperandToPatch->Data.RIPLiteral.PatchableDisp = true;
+        OperandToPatch->Data.RIPLiteral.DispOffset = LastFieldReadOffset;
+      } else if (OperandToPatch->IsGPRIndirect() && ModRM.mod != 1) {
+        Type = DataMaskType::DISP;
+        OperandToPatch->Data.GPRIndirect.PatchableDisp = true;
+        OperandToPatch->Data.GPRIndirect.DispOffset = LastFieldReadOffset;
+      } else if (OperandToPatch->IsSIB()) {
+        FEXCore::X86Tables::SIBDecoded SIB;
+        SIB.Hex = DecodeInst->SIB;
+        if (ModRM.mod == 0b10 || (ModRM.mod == 0 && SIB.base == 0b101)) {
+          Type = DataMaskType::DISP;
+          OperandToPatch->Data.SIB.PatchableDisp = true;
+          OperandToPatch->Data.SIB.DispOffset = LastFieldReadOffset;
+        }
+      }
+    }
   }
 
-  Block.DataMasks.push_back({OpAddress + LastFieldReadOffset, DataMaskType::MOV, LastFieldReadSize});
-  LiteralToPatch->Type = FEXCore::X86Tables::DecodedOperand::OpType::LiteralPatchable;
-  LiteralToPatch->Data.LiteralPatchable.FieldOffset = LastFieldReadOffset;
-  LiteralToPatch->Data.LiteralPatchable.Width = LastFieldReadSize;
+  if (Type == DataMaskType::NONE) {
+    return;
+  }
+  Block.DataMasks.push_back({OpAddress + LastFieldReadOffset, Type, LastFieldReadSize});
+  if (LiteralToPatch && Type == DataMaskType::MOV) {
+    LiteralToPatch->Type = FEXCore::X86Tables::DecodedOperand::OpType::LiteralPatchable;
+    LiteralToPatch->Data.LiteralPatchable.FieldOffset = LastFieldReadOffset;
+    LiteralToPatch->Data.LiteralPatchable.Width = LastFieldReadSize;
+  }
 }
 
 bool Decoder::CheckIfCacheable(FEXCore::Core::InternalThreadState& Thread, const uint8_t* InstStream, uint64_t PC, uint64_t MaxInst) {

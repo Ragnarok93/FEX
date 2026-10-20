@@ -4259,13 +4259,25 @@ AddressMode OpDispatchBuilder::DecodeAddress(const X86Tables::DecodedOp& Op, con
     A.Base = LoadGPRRegister(Operand.Data.GPRIndirect.GPR, GPRSize);
     if (Operand.IsGPRIndirectRelocation()) {
       A.Base = Add(GPRSize, _EntrypointOffset(GPRSize, Operand.Data.GPRIndirect.Displacement), A.Base);
+    } else if (Operand.Data.GPRIndirect.PatchableDisp) {
+      Ref PatchableDisp = _PatchableGuestData(OpSize::i64Bit,
+                                              static_cast<int32_t>(Operand.Data.GPRIndirect.Displacement),
+                                              Op->PC + Operand.Data.GPRIndirect.DispOffset, 4, true);
+      A.Base = Add(GPRSize, A.Base, PatchableDisp);
     } else {
       A.Offset = static_cast<int32_t>(Operand.Data.GPRIndirect.Displacement);
     }
     A.NonTSO |= IsNonTSOReg(AccessType, Operand.Data.GPRIndirect.GPR);
   } else if (Operand.IsRIPRelative() || Operand.IsRIPRelativeRelocation()) {
     if (Is64BitMode) {
-      A.Base = GetRelocatedPC(Op, static_cast<int32_t>(Operand.Data.RIPLiteral.Value));
+      if (Operand.IsRIPRelative() && Operand.Data.RIPLiteral.PatchableDisp) {
+        Ref RIPBase = GetRelocatedPC(Op, 0);
+        Ref PatchableDisp = _PatchableGuestData(OpSize::i64Bit, static_cast<int32_t>(Operand.Data.RIPLiteral.Value),
+                                                Op->PC + Operand.Data.RIPLiteral.DispOffset, 4, true);
+        A.Base = Add(OpSize::i64Bit, RIPBase, PatchableDisp);
+      } else {
+        A.Base = GetRelocatedPC(Op, static_cast<int32_t>(Operand.Data.RIPLiteral.Value));
+      }
     } else {
       // 32bit this isn't RIP relative but instead absolute
       if (Operand.IsRIPRelativeRelocation()) {
@@ -4301,6 +4313,14 @@ AddressMode OpDispatchBuilder::DecodeAddress(const X86Tables::DecodedOp& Op, con
         A.Base = Add(GPRSize, EPOffset, A.Base);
       } else {
         A.Base = EPOffset;
+      }
+    } else if (Operand.Data.SIB.PatchableDisp) {
+      Ref PatchableDisp = _PatchableGuestData(OpSize::i64Bit, static_cast<int32_t>(Operand.Data.SIB.Offset),
+                                              Op->PC + Operand.Data.SIB.DispOffset, 4, true);
+      if (A.Base) {
+        A.Base = Add(GPRSize, A.Base, PatchableDisp);
+      } else {
+        A.Base = PatchableDisp;
       }
     } else {
       A.Offset = static_cast<int32_t>(Operand.Data.SIB.Offset);
