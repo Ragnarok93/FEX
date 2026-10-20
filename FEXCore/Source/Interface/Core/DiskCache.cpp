@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <charconv>
 #include <atomic>
+#include <filesystem>
 
 namespace FEXCore {
 
@@ -191,6 +192,7 @@ namespace DiskCache {
     }
 
     this->ReadOnly = ReadOnly;
+    MaxSizeBytes = MaxFileSize;
     return true;
   }
 
@@ -424,6 +426,59 @@ namespace DiskCache {
     FileMapper = Func;
   }
 
+  static bool IsMachineBucketDirectoryName(std::string_view Name) {
+    if (Name.size() != 16) {
+      return false;
+    }
+    for (const char C : Name) {
+      const bool IsDigit = C >= '0' && C <= '9';
+      const bool IsLowerHex = C >= 'a' && C <= 'f';
+      const bool IsUpperHex = C >= 'A' && C <= 'F';
+      if (!IsDigit && !IsLowerHex && !IsUpperHex) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Only prune generated machine-bucket directories. Never recurse through symlinks or
+  // remove arbitrary user-owned directories that happen to live beside the cache.
+  static void PruneStaleCacheBuckets(std::string_view CacheBase, std::string_view ActiveMachineBucket) {
+    FEX_CONFIG_OPT(DiskCachePruneStaleEntries, DISKCACHEPRUNESTALEENTRIES);
+    if (!DiskCachePruneStaleEntries) {
+      return;
+    }
+
+    fextl::string RootPath(CacheBase);
+    std::error_code IterationError;
+    const std::filesystem::directory_iterator End;
+    std::filesystem::directory_iterator It(std::filesystem::path(RootPath.c_str()),
+                                           std::filesystem::directory_options::skip_permission_denied, IterationError);
+    if (IterationError) {
+      return;
+    }
+
+    for (; It != End; It.increment(IterationError)) {
+      if (IterationError) {
+        IterationError.clear();
+        continue;
+      }
+
+      const fextl::string Name = It->path().filename().string();
+      if (!IsMachineBucketDirectoryName(Name) || Name == ActiveMachineBucket) {
+        continue;
+      }
+
+      std::error_code StatusError;
+      if (It->symlink_status(StatusError).type() != std::filesystem::file_type::directory || StatusError) {
+        continue;
+      }
+
+      std::error_code RemoveError;
+      std::filesystem::remove_all(It->path(), RemoveError);
+    }
+  }
+
   void DiskCache::Init(FEXCore::Context::ContextImpl* CTX) {
     this->CTX = CTX;
     MaxWriteBufferBytes = std::min<uint64_t>(static_cast<uint64_t>(MemoryBufferMB()) * 1024ULL * 1024ULL, 1ULL << 30);
@@ -462,7 +517,10 @@ namespace DiskCache {
     if (BasePath.empty()) {
       BasePath = FEXCore::Config::GetCacheDirectory() + "DiskCache/";
     }
-    BasePath += fextl::fmt::format("{:016x}", MachineBucketHash) + "/";
+    const fextl::string MachineBucketName = fextl::fmt::format("{:016x}", MachineBucketHash);
+    FHU::Filesystem::CreateDirectories(BasePath);
+    PruneStaleCacheBuckets(BasePath, MachineBucketName);
+    BasePath += MachineBucketName + "/";
     FHU::Filesystem::CreateDirectories(BasePath);
 
     if (!MapDiskCacheFiles) {
