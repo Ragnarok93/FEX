@@ -54,6 +54,7 @@ namespace DiskCache {
     uint32_t Size {};
     uint32_t GuestSize {};
     XXH128_hash_t GuestHash {};
+    fextl::vector<uint32_t> GuestExtents;
   };
 
   struct __attribute__((packed)) BlobFixedHeader {
@@ -63,6 +64,7 @@ namespace DiskCache {
     uint32_t SmallRelocCount;
     uint32_t ThunkRelocCount;
     uint32_t TouchedGuestPagesCount;
+    uint32_t GuestExtentsCount; // Number of uint32_t words, offset/length pairs
     XXH128_hash_t GuestHash;
   };
 
@@ -86,6 +88,11 @@ namespace DiskCache {
         uint8_t RegisterIndex;
         uint64_t GuestRIP;
       } RIPMove;
+      struct __attribute__((packed)) {
+        uint8_t RegisterIndex;
+        uint8_t ValueSize;
+        uint32_t SiteOffset;
+      } PatchableData;
     };
   };
 
@@ -202,7 +209,7 @@ namespace DiskCache {
     std::optional<uint64_t> MakeCodeKey(Core::InternalThreadState* Thread, const std::optional<ExecutableFileSectionInfo>& Region, uint64_t GuestRIP);
 
     FEXCore::Context::ContextImpl* CTX;
-    static const uint16_t FormatVersion = 1;
+    static const uint16_t FormatVersion = 2;
     XXH128_hash_t BucketHash;
     fextl::vector<fextl::unique_ptr<IndexedDB>> ROCacheDBs;
     fextl::unique_ptr<IndexedDB> RWCacheDB;
