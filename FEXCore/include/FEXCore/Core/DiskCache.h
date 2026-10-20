@@ -184,8 +184,8 @@ namespace DiskCache {
   public:
     void Init(FEXCore::Context::ContextImpl* CTX);
 
-    std::optional<CodeHitData> Lookup(Core::InternalThreadState* Thread, const ExecutableFileSectionInfo& Region, uint64_t GuestRIP);
-    bool Store(Core::InternalThreadState* Thread, const ExecutableFileSectionInfo& Region, uint64_t GuestRIP,
+    std::optional<CodeHitData> Lookup(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region, uint64_t GuestRIP);
+    bool Store(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region, uint64_t GuestRIP,
                std::span<const uint8_t> GuestCode, const CPU::CPUBackend::CompiledCode& CompiledCode,
                std::span<const FEXCore::CPU::Relocation> Relocations, const Frontend::Decoder::DecodedBlockInformation* DecodedBlockInfo);
 
@@ -199,6 +199,7 @@ namespace DiskCache {
   private:
     bool OpenCacheDB(const fextl::string& CacheDBName, bool ReadOnly, std::span<const uint8_t> ExpectedMetadata);
     uint64_t MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t ModuleOffset, bool Writable, bool MonoBackpatcher);
+    std::optional<uint64_t> MakeCodeKey(Core::InternalThreadState* Thread, const std::optional<ExecutableFileSectionInfo>& Region, uint64_t GuestRIP);
 
     FEXCore::Context::ContextImpl* CTX;
     static const uint16_t FormatVersion = 1;
@@ -235,6 +236,7 @@ namespace DiskCache {
     FEX_CONFIG_OPT(MemoryBufferMB, DISKCACHEMEMORYBUFFERMB);
     FEX_CONFIG_OPT(MemoryCacheSize, DISKCACHEMEMORYSIZE);
     FEX_CONFIG_OPT(RelocationFilter, DISKCACHERELOCATIONFILTER);
+    FEX_CONFIG_OPT(AnonCaching, DISKCACHEANONCACHING);
     FEX_CONFIG_OPT(BasePathOverride, DISKCACHEPATH);
     FEX_CONFIG_OPT(RODBNames, DISKCACHERODBNAMES);
   };

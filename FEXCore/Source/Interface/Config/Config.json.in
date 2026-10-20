@@ -179,6 +179,14 @@
           "Don't cache blocks with relocations pointing outside of any known region"
         ]
       },
+      "DiskCacheAnonCaching": {
+        "Type": "bool",
+        "Default": "true",
+        "AffectsCodeGen": "false",
+        "Desc": [
+          "Attempt to cache anonymous code using exact guest-byte validation"
+        ]
+      },
       "DiskCachePath": {
         "Type": "str",
         "Default": "",

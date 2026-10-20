@@ -839,8 +839,8 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   std::optional<DiskCache::CodeHitData> Hit;
   bool DiskCacheHitRelocationsApplied = false;
   bool LoadDiskCacheCode = true;
-  if (Region && Region->FileStartVA != 0) {
-    Hit = DiskCache.Lookup(Thread, *Region, GuestRIP);
+  {
+    Hit = DiskCache.Lookup(Thread, Region, GuestRIP);
     if (Hit) {
       DiskCacheHitRelocationsApplied = CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(Hit->HostCode), Hit->Relocations, false);
 
@@ -848,10 +848,16 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
         if (LoadedCode.BlockBegin) {
 
-          // annoying to unpack a different copy here, maybe better way to do this
+          // File-backed entries are relative to the image base; anonymous entries
+          // are relative to the block entrypoint. The full guest hash was checked by
+          // DiskCache::Lookup before any cached machine code can be loaded.
+          const uint64_t EntryPointBase = (Region && Region->FileStartVA != 0) ? Region->FileStartVA : GuestRIP;
           fextl::set<uint64_t> EntryPoints;
           for (auto [GuestOffset, HostAddr] : LoadedCode.EntryPoints) {
-            EntryPoints.insert(GuestOffset + Region->FileStartVA);
+            if (GuestOffset > std::numeric_limits<uint64_t>::max() - EntryPointBase) {
+              return 0;
+            }
+            EntryPoints.insert(GuestOffset + EntryPointBase);
           }
           for (auto CodePage : Hit->GuestPages) {
             if (Thread->LookupCache->AddBlockExecutableRange(Thread, EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
@@ -859,11 +865,11 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
             }
           }
           for (auto [GuestOffset, HostAddr] : LoadedCode.EntryPoints) {
-            Thread->LookupCache->AddBlockMapping(Thread, GuestOffset + Region->FileStartVA, Hit->GuestPages, HostAddr);
+            Thread->LookupCache->AddBlockMapping(Thread, GuestOffset + EntryPointBase, Hit->GuestPages, HostAddr);
           }
 
-          uint64_t ModuleOffset = GuestRIP - Region->FileStartVA;
-          return reinterpret_cast<uintptr_t>(LoadedCode.EntryPoints[ModuleOffset]);
+          const uint64_t EntryPointOffset = GuestRIP - EntryPointBase;
+          return reinterpret_cast<uintptr_t>(LoadedCode.EntryPoints[EntryPointOffset]);
         }
       }
     }
@@ -938,17 +944,18 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     }
   }
 
-  // Disk Cache
-  if (Region && Region->FileStartVA != 0) {
+  // Disk Cache: anonymous entries are safe only when the cache relocation filter
+  // can establish that rebased references remain valid.
+  {
     std::span<const FEXCore::CPU::Relocation> Relocations;
     if (DebugData && DebugData->Relocations) {
       Relocations = *DebugData->Relocations;
     }
     std::span<const uint8_t> GuestCode = {reinterpret_cast<const uint8_t*>(StartAddr), Length};
     const Frontend::Decoder::DecodedBlockInformation* BlockInfo = NeedsAddGuestCodeRanges ? Thread->FrontendDecoder->GetDecodedBlockInfo() : nullptr;
-    DiskCache.Store(Thread, *Region, GuestRIP, GuestCode, CompiledCode, Relocations, BlockInfo);
+    DiskCache.Store(Thread, Region, GuestRIP, GuestCode, CompiledCode, Relocations, BlockInfo);
 
-    if (CodeMapWriter) {
+    if (Region && Region->FileStartVA != 0 && CodeMapWriter) {
       CodeMapWriter->AppendBlock(*Region, GuestRIP);
     }
   }

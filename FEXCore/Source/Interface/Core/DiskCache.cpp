@@ -639,6 +639,37 @@ namespace DiskCache {
     return XXH3_64bits(&FileBackedKey, sizeof(FileBackedKey));
   }
 
+  std::optional<uint64_t> DiskCache::MakeCodeKey(Core::InternalThreadState* Thread,
+                                                       const std::optional<ExecutableFileSectionInfo>& Region,
+                                                       uint64_t GuestRIP) {
+    if (Region && Region->FileStartVA != 0) {
+      return MakeFileBackedCodeKey(GuestRIP, *Region);
+    }
+    if (!AnonCaching) {
+      return std::nullopt;
+    }
+
+    const auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
+    if (RangeInfo.Size == 0 || RangeInfo.Base > GuestRIP) {
+      return std::nullopt;
+    }
+    const uint64_t Offset = GuestRIP - RangeInfo.Base;
+    if (Offset >= RangeInfo.Size) {
+      return std::nullopt;
+    }
+
+    constexpr uint64_t PrefixCapacity = 64;
+    const uint64_t Available = RangeInfo.Size - Offset;
+    const size_t PrefixSize = static_cast<size_t>(std::min(PrefixCapacity, Available));
+    struct __attribute__((packed)) {
+      uint64_t Length;
+      uint8_t Bytes[PrefixCapacity];
+    } Prefix {};
+    Prefix.Length = PrefixSize;
+    std::memcpy(Prefix.Bytes, reinterpret_cast<const void*>(GuestRIP), PrefixSize);
+    return XXH3_64bits(&Prefix, sizeof(Prefix));
+  }
+
   uint64_t DiskCache::MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t CodeKey, bool Writable, bool MonoBackpatcher) {
     struct __attribute__((packed)) {
       uint64_t CodeKey;
@@ -716,11 +747,16 @@ namespace DiskCache {
     return CachedBlob;
   }
 
-  std::optional<CodeHitData> DiskCache::Lookup(Core::InternalThreadState* Thread, const ExecutableFileSectionInfo& Region, uint64_t GuestRIP) {
+  std::optional<CodeHitData> DiskCache::Lookup(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region,
+                                               uint64_t GuestRIP) {
     if (!IsReadingDiskCache()) {
       return std::nullopt;
     }
-    uint64_t CodeKey = MakeFileBackedCodeKey(GuestRIP, Region);
+    const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP);
+    if (!CodeKeyValue) {
+      return std::nullopt;
+    }
+    const uint64_t CodeKey = *CodeKeyValue;
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
     uint64_t Hash =
       MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock());
@@ -885,7 +921,7 @@ namespace DiskCache {
     }
   };
 
-  bool DiskCache::Store(Core::InternalThreadState* Thread, const ExecutableFileSectionInfo& Region, uint64_t GuestRIP,
+  bool DiskCache::Store(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region, uint64_t GuestRIP,
                         std::span<const uint8_t> GuestCode, const CPU::CPUBackend::CompiledCode& CompiledCode,
                         std::span<const FEXCore::CPU::Relocation> Relocations, const Frontend::Decoder::DecodedBlockInformation* DecodedBlockInfo) {
     if (!IsWritingDiskCache()) {
@@ -906,19 +942,28 @@ namespace DiskCache {
           continue;
         }
         uint64_t Target = Reloc.GuestRIP.GuestRIP;
-        if (Target >= Region.BeginVA && Target < Region.EndVA) {
-          continue;
-        }
-        // Relocations into another PT_LOAD segment or .bss in the same ELF image
-        // are stable under relocation of the image as a whole.
-        if (Region.FileInfo.MappedSize && Target >= Region.FileStartVA &&
-            Target - Region.FileStartVA < Region.FileInfo.MappedSize) {
-          continue;
-        }
-        auto TargetSection = CTX->SyscallHandler->LookupExecutableFileSection(Thread, Target);
-        if (!TargetSection || TargetSection->FileInfo.FileId != Region.FileInfo.FileId) {
-          // we don't know where it's pointing, so we don't know how to encode the offset, so we can't cache atm
-          return false;
+        if (Region && Region->FileStartVA != 0) {
+          if (Target >= Region->BeginVA && Target < Region->EndVA) {
+            continue;
+          }
+          // Relocations into another PT_LOAD segment or .bss in the same ELF image
+          // are stable under relocation of the image as a whole.
+          if (Region->FileInfo.MappedSize && Target >= Region->FileStartVA &&
+              Target - Region->FileStartVA < Region->FileInfo.MappedSize) {
+            continue;
+          }
+          auto TargetSection = CTX->SyscallHandler->LookupExecutableFileSection(Thread, Target);
+          if (!TargetSection || TargetSection->FileInfo.FileId != Region->FileInfo.FileId) {
+            // We cannot encode the target's identity/offset safely.
+            return false;
+          }
+        } else {
+          // Without a backing ELF identity only in-block RIP targets have a stable
+          // relocation under rebasing. Refuse other targets instead of serializing a
+          // process-specific absolute pointer into a reusable cache entry.
+          if (Target < GuestRIP || Target - GuestRIP >= GuestCode.size()) {
+            return false;
+          }
         }
       }
     }
@@ -979,7 +1024,11 @@ namespace DiskCache {
     Blob.resize(TotalSize);
     uint8_t* BlobData = Blob.data();
 
-    uint64_t CodeKey = MakeFileBackedCodeKey(GuestRIP, Region);
+    const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP);
+    if (!CodeKeyValue) {
+      return false;
+    }
+    const uint64_t CodeKey = *CodeKeyValue;
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
     uint64_t BlobKey =
       MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock());
@@ -1002,8 +1051,12 @@ namespace DiskCache {
     // pack and relocate entrypoints
     auto* EntryPoints = reinterpret_cast<BlobEntryPoint*>(BlobData + EntryPointsOffset);
     uint32_t EntryIdx = 0;
+    const uint64_t EntryPointBase = (Region && Region->FileStartVA != 0) ? Region->FileStartVA : GuestRIP;
     for (auto [GuestAddr, HostAddr] : CompiledCode.EntryPoints) {
-      EntryPoints[EntryIdx++] = {GuestAddr - Region.FileStartVA, uint32_t(HostAddr - CompiledCode.BlockBegin)};
+      if (GuestAddr < EntryPointBase || GuestAddr - EntryPointBase > std::numeric_limits<uint32_t>::max()) {
+        return false;
+      }
+      EntryPoints[EntryIdx++] = {GuestAddr - EntryPointBase, uint32_t(HostAddr - CompiledCode.BlockBegin)};
     }
 
     // pack relocations
