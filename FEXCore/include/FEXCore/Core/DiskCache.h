@@ -12,6 +12,7 @@
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/unordered_set.h>
 #include <FEXCore/fextl/robin_map.h>
+#include <FEXCore/fextl/list.h>
 #include <FEXCore/fextl/vector.h>
 #include <stdint.h>
 #include <atomic>
@@ -204,12 +205,27 @@ namespace DiskCache {
     std::atomic<uint64_t> PendingWriteBufferBytes {};
     uint64_t MaxWriteBufferBytes = 0;
 
+    // Decoded cache blobs stay in a bounded in-memory LRU after a successful disk lookup.
+    // Shared ownership lets an in-flight lookup retain the bytes even after an eviction.
+    struct MemoryCacheEntry {
+      fextl::shared_ptr<fextl::vector<uint8_t>> Blob;
+      fextl::list<uint64_t>::iterator LRUPosition;
+    };
+    fextl::robin_map<uint64_t, MemoryCacheEntry> MemoryCacheEntries;
+    fextl::list<uint64_t> MemoryCacheLRU;
+    std::mutex MemoryCacheLock;
+    uint64_t MemoryCacheCurrentBytes = 0;
+
+    fextl::shared_ptr<fextl::vector<uint8_t>> LookupMemoryCache(uint64_t Key);
+    void StoreMemoryCache(uint64_t Key, std::span<const uint8_t> Blob);
+
     // The Writer holds references to all the fields above and must be destroyed first.
     fextl::unique_ptr<WorkQueueThread> Writer;
 
     FEX_CONFIG_OPT(EnableDiskCache, DISKCACHE);
     FEX_CONFIG_OPT(MapDiskCacheFiles, DISKCACHEFILEMAPPING);
     FEX_CONFIG_OPT(MemoryBufferMB, DISKCACHEMEMORYBUFFERMB);
+    FEX_CONFIG_OPT(MemoryCacheSize, DISKCACHEMEMORYSIZE);
     FEX_CONFIG_OPT(RelocationFilter, DISKCACHERELOCATIONFILTER);
     FEX_CONFIG_OPT(BasePathOverride, DISKCACHEPATH);
     FEX_CONFIG_OPT(RODBNames, DISKCACHERODBNAMES);
