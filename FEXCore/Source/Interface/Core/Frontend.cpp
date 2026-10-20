@@ -1404,7 +1404,7 @@ void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
   // Displacements can be patched only when their field is the last field read by
   // the decoder. Instructions with a separate immediate are left byte-exact until
   // the decoder tracks multiple fields per instruction.
-  if (Type == DataMaskType::NONE && BlockInfo.Is64BitMode && LastFieldReadSize == 4 &&
+  if (Type == DataMaskType::NONE && LastFieldReadSize == 4 &&
       (DecodeInst->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_DECODED_MODRM)) {
     FEXCore::X86Tables::ModRMDecoded ModRM;
     ModRM.Hex = DecodeInst->ModRM;
@@ -1434,7 +1434,9 @@ void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
         // NOP displacements are irrelevant to execution; hash masking can ignore them,
         // but no runtime patch relocation is needed.
         Type = DataMaskType::NOP;
-      } else if (OperandToPatch->IsRIPRelative()) {
+      } else if (OperandToPatch->IsRIPRelative() && BlockInfo.Is64BitMode) {
+        // In 32-bit guest mode this operand encodes an absolute disp32, not RIP-relative
+        // addressing. The current address lowering keeps that value inline, so don't mask it.
         Type = DataMaskType::DISP;
         OperandToPatch->Data.RIPLiteral.PatchableDisp = true;
         OperandToPatch->Data.RIPLiteral.DispOffset = LastFieldReadOffset;

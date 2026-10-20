@@ -15,8 +15,12 @@
 ; at byte index 5 in the second string. In 32-bit mode PCMPxSTRI must return
 ; the index in ECX while preserving the explicit input lengths in EAX and EDX.
 
-movaps xmm2, [.data]
-movaps xmm3, [.data + 32]
+; Use SIB addressing with 32-bit disp32 fields so cache tests exercise
+; patchable guest displacements in 32-bit mode, not only absolute operands.
+mov ebx, .data
+xor ecx, ecx
+movaps xmm2, [ebx + ecx*1 + strict dword 0]
+movaps xmm3, [ebx + ecx*1 + strict dword 32]
 
 mov eax, 15
 mov edx, 16
