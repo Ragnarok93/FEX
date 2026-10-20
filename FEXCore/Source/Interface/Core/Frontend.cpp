@@ -1367,7 +1367,7 @@ const uint8_t* Decoder::AdjustAddrForSpecialRegion(const uint8_t* _InstStream, u
 }
 
 void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
-  if (!BlockInfo.Is64BitMode || !DecodeInst || LastFieldReadSize < 4) {
+  if (!DecodeInst || LastFieldReadSize < 4) {
     return;
   }
 
@@ -1391,7 +1391,7 @@ void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
   // Displacements can be patched only when their field is the last field read by
   // the decoder. Instructions with a separate immediate are left byte-exact until
   // the decoder tracks multiple fields per instruction.
-  if (Type == DataMaskType::NONE && LastFieldReadSize == 4 &&
+  if (Type == DataMaskType::NONE && BlockInfo.Is64BitMode && LastFieldReadSize == 4 &&
       (DecodeInst->Flags & FEXCore::X86Tables::DecodeFlags::FLAG_DECODED_MODRM)) {
     FEXCore::X86Tables::ModRMDecoded ModRM;
     ModRM.Hex = DecodeInst->ModRM;
@@ -1601,7 +1601,7 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
       ++BlockIt->NumInstructions;
       BlockIt->Size += DecodeInst->InstSize;
 
-      if (WantsDataMasks && BlockIt->BlockStatus == DecodedBlockStatus::SUCCESS && BlockInfo.Is64BitMode && !Relocations) {
+      if (WantsDataMasks && BlockIt->BlockStatus == DecodedBlockStatus::SUCCESS && !Relocations) {
         DetectDataMasks(OpAddress, *BlockIt);
       }
 
