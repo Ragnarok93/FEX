@@ -849,16 +849,10 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   {
     Hit = DiskCache.Lookup(Thread, Region, GuestRIP);
     if (Hit) {
-      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] hit rip=%llx host=%zu entrypoints=%zu relocs=%zu pages=%zu\\n",
-                   static_cast<unsigned long long>(GuestRIP), Hit->HostCode.size(), Hit->EntryPoints.size(),
-                   Hit->Relocations.size(), Hit->GuestPages.size());
       DiskCacheHitRelocationsApplied = CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(Hit->HostCode), Hit->Relocations, false);
-      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] relocations-applied=%d\\n", int(DiskCacheHitRelocationsApplied));
 
       if (DiskCacheHitRelocationsApplied && LoadDiskCacheCode) {
         auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
-        std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] loaded=%d size=%zu entries=%zu\\n",
-                     int(LoadedCode.BlockBegin != nullptr), LoadedCode.Size, LoadedCode.EntryPoints.size());
         if (LoadedCode.BlockBegin) {
 
           // File-backed entries are relative to the image base; anonymous entries
@@ -888,6 +882,11 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
             // dispatcher may still hold views into guest code buffers used while
             // resolving this block. Release/validate those views before entering
             // cached machine code.
+            // A cache hit can enter a block without passing through the normal
+            // compile path that refreshes the saved guest RIP. Keep the frame in
+            // sync with the actual entrypoint so HLT/fault handling sees the right
+            // guest instruction address.
+            Thread->CurrentFrame->State.rip = GuestRIP;
             Thread->FrontendDecoder->DelayedDisownBuffer();
             Thread->FrontendDecoder->ValidateDisownedOrFree();
             Thread->OpDispatcher->ValidateDisownedOrFree();
