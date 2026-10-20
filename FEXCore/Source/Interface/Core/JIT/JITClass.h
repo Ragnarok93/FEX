@@ -563,7 +563,7 @@ private:
    * @param Constant - The guest RIP that will be relocated
    */
   void InsertGuestRIPMove(ARMEmitter::Register Reg, uint64_t Constant);
-  void InsertGuestPatchableDataMove(ARMEmitter::Register Reg, uint64_t Value, uint64_t SiteAddress, uint8_t ValueSize);
+  void InsertGuestPatchableDataMove(ARMEmitter::Register Reg, uint64_t Value, uint64_t SiteAddress, uint8_t ValueSize, bool SignExtend = false);
 
   /**
    * @brief Inserts a named symbol as a literal in memory

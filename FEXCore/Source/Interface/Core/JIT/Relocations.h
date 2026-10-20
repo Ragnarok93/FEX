@@ -81,7 +81,8 @@ struct RelocGuestPatchableData final {
   RelocationHeader Header {};
   uint8_t RegisterIndex;
   uint8_t ValueSize;
-  char Pad[2];
+  bool SignExtend;
+  char Pad {};
   uint64_t SiteAddress;
   uint32_t pad2[6] {};
 };
