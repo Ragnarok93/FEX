@@ -189,7 +189,7 @@ namespace DiskCache {
 
   private:
     bool OpenCacheDB(const fextl::string& CacheDBName, bool ReadOnly, std::span<const uint8_t> ExpectedMetadata);
-    uint64_t MakeBlobKey(const uint64_t ModuleOffset);
+    uint64_t MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t ModuleOffset, bool Writable, bool MonoBackpatcher);
 
     FEXCore::Context::ContextImpl* CTX;
     static const uint16_t FormatVersion = 1;
