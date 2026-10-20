@@ -1125,12 +1125,12 @@ namespace DiskCache {
     }
     const uint32_t EntryPointCount = static_cast<uint32_t>(CompiledCode.EntryPoints.size());
     const uint32_t TouchedGuestPagesCount = DecodedBlockInfo ? static_cast<uint32_t>(DecodedBlockInfo->CodePages.size()) : 0;
-    // Cached host code is copied into the JIT code buffer in 16-byte units. Persist
-    // explicit zero padding so the cache payload obeys the same alignment contract.
-    if (CompiledCode.Size > MaxSerializedField - 15) {
+    // The JIT emitter aligns every compiled block to this contract. Reject a
+    // malformed block instead of padding its serialized size and disagreeing with
+    // the embedded JITBlockTail::Size.
+    if ((CompiledCode.Size % 16) != 0) {
       return false;
     }
-    const size_t SerializedHostSize = (CompiledCode.Size + 15) & ~size_t(15);
 
     // Validate every serialized patch site against the guest-code payload. CRC sites
     // span an instruction (up to 16 bytes); data relocations patch an immediate of at most 8.
@@ -1217,14 +1217,14 @@ namespace DiskCache {
     const size_t GuestPagesBytes = static_cast<size_t>(TouchedGuestPagesCount) * sizeof(int64_t);
     constexpr size_t MaxSize = std::numeric_limits<size_t>::max();
     if (GuestExtentsBytes > MaxSize - sizeof(BlobFixedHeader) ||
-        SerializedHostSize > MaxSize - HostCodeOffset ||
-        EntryPointsBytes > MaxSize - HostCodeOffset - SerializedHostSize ||
-        SmallRelocsBytes > MaxSize - HostCodeOffset - SerializedHostSize - EntryPointsBytes ||
-        ThunkRelocsBytes > MaxSize - HostCodeOffset - SerializedHostSize - EntryPointsBytes - SmallRelocsBytes ||
-        GuestPagesBytes > MaxSize - HostCodeOffset - SerializedHostSize - EntryPointsBytes - SmallRelocsBytes - ThunkRelocsBytes) {
+        CompiledCode.Size > MaxSize - HostCodeOffset ||
+        EntryPointsBytes > MaxSize - HostCodeOffset - CompiledCode.Size ||
+        SmallRelocsBytes > MaxSize - HostCodeOffset - CompiledCode.Size - EntryPointsBytes ||
+        ThunkRelocsBytes > MaxSize - HostCodeOffset - CompiledCode.Size - EntryPointsBytes - SmallRelocsBytes ||
+        GuestPagesBytes > MaxSize - HostCodeOffset - CompiledCode.Size - EntryPointsBytes - SmallRelocsBytes - ThunkRelocsBytes) {
       return false;
     }
-    const size_t EntryPointsOffset = HostCodeOffset + SerializedHostSize;
+    const size_t EntryPointsOffset = HostCodeOffset + CompiledCode.Size;
     const size_t SmallRelocsOffset = EntryPointsOffset + EntryPointsBytes;
     const size_t ThunkRelocsOffset = SmallRelocsOffset + SmallRelocsBytes;
     const size_t TouchedGuestPagesOffset = ThunkRelocsOffset + ThunkRelocsBytes;
@@ -1254,7 +1254,7 @@ namespace DiskCache {
 
     BlobFixedHeader Header {
       .GuestSize = (uint32_t)GuestCode.size(),
-      .HostSize = static_cast<uint32_t>(SerializedHostSize),
+      .HostSize = static_cast<uint32_t>(CompiledCode.Size),
       .EntryPointCount = EntryPointCount,
       .SmallRelocCount = SmallRelocCount,
       .ThunkRelocCount = ThunkRelocCount,
