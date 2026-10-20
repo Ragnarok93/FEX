@@ -29,6 +29,10 @@ enum class RelocationTypes : uint32_t {
   // Reload a guest immediate from its live code field when loading cached code.
   // Aligned to struct RelocGuestPatchableData
   RELOC_GUEST_PATCHABLE_DATA_MOVE,
+
+  // Recompute a Full-SMC validation CRC from current guest instruction bytes on cache load.
+  // Uses the RelocGuestPatchableData payload.
+  RELOC_GUEST_PATCHABLE_CRC_MOVE,
 };
 
 struct FEX_PACKED RelocationHeader final {
