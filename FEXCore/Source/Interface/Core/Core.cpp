@@ -865,8 +865,15 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
       if (DiskCacheHitRelocationsApplied && LoadDiskCacheCode) {
         auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
-        std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] loaded=%d size=%zu entries=%zu\\n",
-                     int(LoadedCode.BlockBegin != nullptr), LoadedCode.Size, LoadedCode.EntryPoints.size());
+        std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] loaded=%d block=%p size=%zu host-offset=%llu entries=%zu guest-rip=%llx\\n",
+                     int(LoadedCode.BlockBegin != nullptr), static_cast<void*>(LoadedCode.BlockBegin),
+                     LoadedCode.Size, static_cast<unsigned long long>(LoadedCode.HostCodeOffset),
+                     LoadedCode.EntryPoints.size(), static_cast<unsigned long long>(GuestRIP));
+        for (const auto& Ep : Hit->EntryPoints) {
+          std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] ep guest-offset=%llx host-offset=%u loaded-host=%p\\n",
+                       static_cast<unsigned long long>(Ep.GuestRIP), Ep.HostOffset,
+                       static_cast<void*>(LoadedCode.EntryPoints.contains(Ep.GuestRIP) ? LoadedCode.EntryPoints[Ep.GuestRIP] : nullptr));
+        }
         if (LoadedCode.BlockBegin) {
 
           // File-backed entries are relative to the image base; anonymous entries
