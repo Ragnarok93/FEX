@@ -18,6 +18,7 @@
 #include <charconv>
 #include <atomic>
 #include <filesystem>
+#include <iterator>
 
 namespace FEXCore {
 
