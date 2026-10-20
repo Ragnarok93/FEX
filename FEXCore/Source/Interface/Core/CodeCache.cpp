@@ -665,9 +665,17 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
     }
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
       uint64_t Pointer = Reloc.GuestRIP.GuestRIP + GuestEntry;
-      // TODO: Pointers are required to fit within 48-bit VA space.
-      // But forcing 6-byte broke relocations.
+      std::fprintf(stderr,
+                   "[FEX-DISK-CACHE-DEBUG] rip-move guest-entry=%llx guest-offset=%llx target=%llx hostoff=%llu reg=%u\\n",
+                   static_cast<unsigned long long>(GuestEntry),
+                   static_cast<unsigned long long>(Reloc.GuestRIP.GuestRIP),
+                   static_cast<unsigned long long>(Pointer),
+                   static_cast<unsigned long long>(Reloc.Header.Offset),
+                   unsigned(Reloc.GuestRIP.RegisterIndex));
       Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIP.RegisterIndex), Pointer, CPU::Arm64Emitter::PadType::DOPAD);
+      const auto* Words = reinterpret_cast<const uint32_t*>(Code.data() + Reloc.Header.Offset);
+      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] rip-move words=%08x %08x %08x %08x\\n",
+                   Words[0], Words[1], Words[2], Words[3]);
       break;
     }
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE: {
