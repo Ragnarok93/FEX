@@ -1061,9 +1061,12 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   }
 
   SetCursorOffset(JITRIPEntriesLocation - CodeData.BlockBegin);
-  Align();
+  // Make sure code is 16B aligned on the tail.
+  // Can't use Align16B here as vl64pair can cause non-4byte alignment.
+  Align(16);
 
-  CodeData.Size = GetCursorAddress<uint8_t*>() - CodeData.BlockBegin;
+  // Beginning of emission is guaranteed to be offset zero, so use the current cursor.
+  CodeData.Size = GetCursorOffset();
 
   // Finalize and write block tail data
   JITBlockTail.Size = CodeData.Size;
