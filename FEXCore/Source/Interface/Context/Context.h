@@ -402,7 +402,7 @@ private:
   fextl::set<uint64_t> ForceTSOInstructions;
 
   bool MonoDetected = false;
-  std::atomic<uint64_t> MonoBackpatcherBlock;
+  std::atomic<uint64_t> MonoBackpatcherBlock {};
 
   std::mutex CodeBufferListLock;
   fextl::vector<std::weak_ptr<CPU::CodeBuffer>> CodeBufferList;
