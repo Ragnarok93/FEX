@@ -56,7 +56,7 @@ DEF_OP(Constant) {
 
 DEF_OP(PatchableGuestData) {
   auto Op = IROp->C<IR::IROp_PatchableGuestData>();
-  InsertGuestPatchableDataMove(GetReg(Node), Op->Value, Op->SiteAddress, static_cast<uint8_t>(Op->SiteSize));
+  InsertGuestPatchableDataMove(GetReg(Node), Op->Value, Op->SiteAddress, static_cast<uint8_t>(Op->SiteSize), Op->SignExtend);
 }
 
 DEF_OP(EntrypointOffset) {

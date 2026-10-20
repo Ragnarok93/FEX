@@ -932,7 +932,7 @@
       }
     },
     "ALU": {
-      "GPR = PatchableGuestData OpSize:#Size, i64:$Value, i64:$SiteAddress, i64:$SiteSize": {
+      "GPR = PatchableGuestData OpSize:#Size, i64:$Value, i64:$SiteAddress, i64:$SiteSize, i1:$SignExtend{false}": {
         "Desc": ["Loads a value in a patchable way",
                  "Disk-cache load replaces the value with the live guest bytes at SiteAddress"
                 ],

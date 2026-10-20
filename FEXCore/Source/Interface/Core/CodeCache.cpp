@@ -645,7 +645,15 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE: {
       uint64_t Value = 0;
       if (!ForStorage) {
+        if (Reloc.GuestPatchableData.ValueSize == 0 || Reloc.GuestPatchableData.ValueSize > sizeof(Value)) {
+          return false;
+        }
         std::memcpy(&Value, reinterpret_cast<const void*>(Reloc.GuestPatchableData.SiteAddress), Reloc.GuestPatchableData.ValueSize);
+        if (Reloc.GuestPatchableData.SignExtend && Reloc.GuestPatchableData.ValueSize < sizeof(Value)) {
+          const unsigned BitCount = Reloc.GuestPatchableData.ValueSize * 8;
+          const uint64_t SignBit = uint64_t {1} << (BitCount - 1);
+          Value = (Value ^ SignBit) - SignBit;
+        }
       }
       Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestPatchableData.RegisterIndex), Value,
                            CPU::Arm64Emitter::PadType::DOPAD);
