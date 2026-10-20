@@ -178,6 +178,14 @@ namespace DiskCache {
     return true;
   }
 
+  static uint64_t GetBlobSizeNeeded(const BlobFixedHeader& Header) {
+    return sizeof(BlobFixedHeader) + static_cast<uint64_t>(Header.HostSize) +
+           static_cast<uint64_t>(Header.EntryPointCount) * sizeof(BlobEntryPoint) +
+           static_cast<uint64_t>(Header.SmallRelocCount) * sizeof(BlobSmallRelocation) +
+           static_cast<uint64_t>(Header.ThunkRelocCount) * sizeof(BlobThunkRelocation) +
+           static_cast<uint64_t>(Header.TouchedGuestPagesCount) * sizeof(int64_t);
+  }
+
   bool IndexedDB::Open(const fextl::string& CacheDBName, bool ReadOnly) {
     if (!CacheFOZ.Open(CacheDBName + ".foz", ReadOnly)) {
       return false;
@@ -240,10 +248,30 @@ namespace DiskCache {
         const auto ParseResult = std::from_chars(KeyBegin, KeyEnd, Key, 16);
         // Cache files persist across runs and can be truncated or corrupted. Never use
         // an uninitialized hash when a malformed key fails integer parsing.
-        if (ParseResult.ec != std::errc {} || ParseResult.ptr != KeyEnd || IndexBlobPayload->hash != Key) {
+        if (ParseResult.ec != std::errc {} || ParseResult.ptr != KeyEnd || IndexBlobPayload->hash != Key ||
+            IndexBlobPayload->size < sizeof(BlobFixedHeader)) {
           continue;
         }
-        CacheIndex.insert({IndexBlobPayload->hash, {this, IndexBlobPayload->cache_db_file_offset, IndexBlobPayload->size}});
+
+        BlobFixedHeader BlobHeader {};
+        std::span<uint8_t> HeaderBytes {reinterpret_cast<uint8_t*>(&BlobHeader), sizeof(BlobHeader)};
+        if (!ReadCacheBlob(IndexBlobPayload->cache_db_file_offset, HeaderBytes) || BlobHeader.GuestSize == 0 ||
+            GetBlobSizeNeeded(BlobHeader) > IndexBlobPayload->size) {
+          continue;
+        }
+
+        // A lookup hash can legitimately have multiple guest-code variants (for example,
+        // writable/executable pages after self-modifying-code changes). Keep each distinct
+        // guest hash rather than permanently pinning the first variant seen in this DB.
+        auto& Entries = CacheIndex[IndexBlobPayload->hash];
+        const auto Duplicate = std::find_if(Entries.begin(), Entries.end(), [&](const IndexEntry& Entry) {
+          return Entry.GuestSize == BlobHeader.GuestSize &&
+                 std::memcmp(&Entry.GuestHash, &BlobHeader.GuestHash, sizeof(BlobHeader.GuestHash)) == 0;
+        });
+        if (Duplicate == Entries.end()) {
+          Entries.push_back({this, IndexBlobPayload->cache_db_file_offset, IndexBlobPayload->size,
+                             BlobHeader.GuestSize, BlobHeader.GuestHash});
+        }
       } else {
         // Treat metadata as present only if the index record and payload match the
         // bucket we opened. A corrupt/stale sentinel must not suppress metadata repair.
@@ -294,21 +322,40 @@ namespace DiskCache {
     if (Blob.size() > std::numeric_limits<uint32_t>::max()) {
       return false;
     }
+    const bool IsMetadataKey = std::all_of(Key.bytes, Key.bytes + sizeof(Key.bytes), [](uint8_t Byte) { return Byte == 0xFF; });
     uint64_t Hash {};
-    if (Key.bytes[39] != 0xFF) {
+    BlobFixedHeader BlobHeader {};
+    if (!IsMetadataKey) {
       const char* KeyBegin = reinterpret_cast<const char*>(Key.bytes);
       const char* KeyEnd = reinterpret_cast<const char*>(&Key.bytes[16]);
       const auto ParseResult = std::from_chars(KeyBegin, KeyEnd, Hash, 16);
-      if (ParseResult.ec != std::errc {} || ParseResult.ptr != KeyEnd) {
+      if (ParseResult.ec != std::errc {} || ParseResult.ptr != KeyEnd || Blob.size() < sizeof(BlobHeader)) {
+        return false;
+      }
+      memcpy(&BlobHeader, Blob.data(), sizeof(BlobHeader));
+      if (BlobHeader.GuestSize == 0 || GetBlobSizeNeeded(BlobHeader) > Blob.size()) {
         return false;
       }
     } else {
-      Hash = ~0;
+      Hash = ~uint64_t {};
     }
+
+    auto AlreadyHasVariant = [&]() {
+      auto It = Index.find(Hash);
+      if (It == Index.end()) {
+        return false;
+      }
+      if (IsMetadataKey) {
+        return !It->second.empty();
+      }
+      return std::any_of(It->second.begin(), It->second.end(), [&](const IndexEntry& Entry) {
+        return Entry.GuestSize == BlobHeader.GuestSize &&
+               std::memcmp(&Entry.GuestHash, &BlobHeader.GuestHash, sizeof(BlobHeader.GuestHash)) == 0;
+      });
+    };
     {
       std::lock_guard Guard(IndexMutex);
-      if (Index.contains(Hash)) {
-        // shouldn't really happen.. assert or something?
+      if (AlreadyHasVariant()) {
         return true;
       }
     }
@@ -324,7 +371,7 @@ namespace DiskCache {
     // append duplicate records and consume the bounded cache capacity unnecessarily.
     {
       std::lock_guard Guard(IndexMutex);
-      if (Index.contains(Hash)) {
+      if (AlreadyHasVariant()) {
         CacheFOZ.Unlock();
         IndexFOZ.Unlock();
         return true;
@@ -383,16 +430,24 @@ namespace DiskCache {
       return false;
     }
 
-    CacheFOZ.Unlock();
-    IndexFOZ.Unlock();
-
-    // publish new file size for memory-mapped reads
+    // Publish the new mapping size and index entry before dropping the per-file locks:
+    // another writer in this process must not append the same guest variant in this window.
     if (CacheFileMapping) {
       CacheFileSize = BlobOffset + Blob.size();
     }
 
-    std::lock_guard Guard(IndexMutex);
-    Index[Hash] = {this, BlobOffset, (uint32_t)Blob.size()};
+    {
+      std::lock_guard Guard(IndexMutex);
+      auto& Entries = Index[Hash];
+      if (IsMetadataKey) {
+        Entries.push_back({this, BlobOffset, static_cast<uint32_t>(Blob.size()), 0, {}});
+      } else {
+        Entries.push_back({this, BlobOffset, static_cast<uint32_t>(Blob.size()), BlobHeader.GuestSize, BlobHeader.GuestHash});
+      }
+    }
+
+    CacheFOZ.Unlock();
+    IndexFOZ.Unlock();
     return true;
   }
 
@@ -598,6 +653,15 @@ namespace DiskCache {
     return XXH3_64bits(&BlobKeyBytes, sizeof(BlobKeyBytes));
   }
 
+  static uint64_t MakeMemoryCacheKey(uint64_t LookupKey, uint32_t GuestSize, const XXH128_hash_t& GuestHash) {
+    struct __attribute__((packed)) {
+      uint64_t LookupKey;
+      uint32_t GuestSize;
+      XXH128_hash_t GuestHash;
+    } KeyData {LookupKey, GuestSize, GuestHash};
+    return XXH3_64bits(&KeyData, sizeof(KeyData));
+  }
+
   fextl::shared_ptr<fextl::vector<uint8_t>> DiskCache::LookupMemoryCache(uint64_t Key) {
     std::lock_guard Guard(MemoryCacheLock);
     auto It = MemoryCacheEntries.find(Key);
@@ -621,8 +685,9 @@ namespace DiskCache {
     std::lock_guard Guard(MemoryCacheLock);
     auto Existing = MemoryCacheEntries.find(Key);
     if (Existing != MemoryCacheEntries.end()) {
-      MemoryCacheLRU.splice(MemoryCacheLRU.begin(), MemoryCacheLRU, Existing->second.LRUPosition);
-      return;
+      MemoryCacheCurrentBytes -= Existing->second.Blob->size();
+      MemoryCacheLRU.erase(Existing->second.LRUPosition);
+      MemoryCacheEntries.erase(Existing);
     }
 
     while (!MemoryCacheLRU.empty() && MemoryCacheCurrentBytes > MaxBytes - CachedBlob->size()) {
@@ -649,7 +714,7 @@ namespace DiskCache {
     uint64_t Hash =
       MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock());
 
-    IndexEntry Entry;
+    fextl::vector<IndexEntry> Candidates;
     {
       std::lock_guard Guard(IndexLock);
       auto It = Index.find(Hash);
@@ -657,12 +722,44 @@ namespace DiskCache {
         // definite miss
         return std::nullopt;
       }
-      // we can't hold onto the iterator, the map may shift while we don't hold the lock
-      Entry = It->second;
+      Candidates = It->second;
     }
-    // Found a key hash match; serve it from the bounded read LRU when available.
+
+    // Validate the candidate sizes against the live executable mapping first.
+    if (RangeInfo.Size == 0 || RangeInfo.Base > GuestRIP) {
+      return std::nullopt;
+    }
+    const uint64_t GuestOffsetInRange = GuestRIP - RangeInfo.Base;
+    if (GuestOffsetInRange >= RangeInfo.Size) {
+      return std::nullopt;
+    }
+    const uint64_t Available = RangeInfo.Size - GuestOffsetInRange;
+
+    // A stable key can have several guest-code variants. Select the variant whose stored
+    // guest hash matches the current code, instead of letting an old SMC version shadow
+    // every later version indefinitely.
+    IndexEntry Entry {};
+    XXH128_hash_t LiveGuestHash {};
+    bool FoundGuestVariant = false;
+    for (const auto& Candidate : Candidates) {
+      if (Candidate.GuestSize == 0 || Available < Candidate.GuestSize) {
+        continue;
+      }
+      const XXH128_hash_t CandidateHash = XXH3_128bits(reinterpret_cast<void*>(GuestRIP), Candidate.GuestSize);
+      if (std::memcmp(&CandidateHash, &Candidate.GuestHash, sizeof(CandidateHash)) == 0) {
+        Entry = Candidate;
+        LiveGuestHash = CandidateHash;
+        FoundGuestVariant = true;
+        break;
+      }
+    }
+    if (!FoundGuestVariant) {
+      return std::nullopt;
+    }
+
+    const uint64_t MemoryCacheKey = MakeMemoryCacheKey(Hash, Entry.GuestSize, Entry.GuestHash);
     CodeHitData HitData;
-    auto CachedBlob = LookupMemoryCache(Hash);
+    auto CachedBlob = LookupMemoryCache(MemoryCacheKey);
     if (CachedBlob && CachedBlob->size() == Entry.Size) {
       HitData.CachedBlob = std::move(CachedBlob);
     } else {
@@ -676,36 +773,18 @@ namespace DiskCache {
     if (Entry.Size < sizeof(BlobFixedHeader)) {
       return std::nullopt;
     }
-    BlobFixedHeader Header;
+    BlobFixedHeader Header {};
     memcpy(&Header, BlobData, sizeof(Header));
 
-    // do we have enough room in our live code to even hash GuestSize worth?
-    if (RangeInfo.Size == 0 || RangeInfo.Base > GuestRIP) {
+    if (Header.GuestSize != Entry.GuestSize ||
+        std::memcmp(&Header.GuestHash, &Entry.GuestHash, sizeof(Header.GuestHash)) != 0 ||
+        std::memcmp(&LiveGuestHash, &Header.GuestHash, sizeof(Header.GuestHash)) != 0) {
       return std::nullopt;
     }
-    const uint64_t GuestOffsetInRange = GuestRIP - RangeInfo.Base;
-    if (GuestOffsetInRange >= RangeInfo.Size) {
-      return std::nullopt;
-    }
-    const uint64_t Available = RangeInfo.Size - GuestOffsetInRange;
-    if (Available < Header.GuestSize) {
-      return std::nullopt;
-    }
-
-    XXH128_hash_t LiveGuestHash = XXH3_128bits(reinterpret_cast<void*>(GuestRIP), Header.GuestSize);
-    if (std::memcmp(&LiveGuestHash, &Header.GuestHash, sizeof(Header.GuestHash)) != 0) {
-      // LogMan::Msg::IFmt("hash mismatch! length {:d}", Header.GuestSize);
-      return std::nullopt;
-    }
-    // LogMan::Msg::IFmt("hash ok! length {:d}", Header.GuestSize);
 
     // Validate the serialized lengths using 64-bit arithmetic. The cache is persistent
     // input, so a corrupt header must not wrap SizeNeeded and produce out-of-bounds spans.
-    const uint64_t SizeNeeded = sizeof(Header) + static_cast<uint64_t>(Header.HostSize) +
-                                static_cast<uint64_t>(Header.EntryPointCount) * sizeof(BlobEntryPoint) +
-                                static_cast<uint64_t>(Header.SmallRelocCount) * sizeof(BlobSmallRelocation) +
-                                static_cast<uint64_t>(Header.ThunkRelocCount) * sizeof(BlobThunkRelocation) +
-                                static_cast<uint64_t>(Header.TouchedGuestPagesCount) * sizeof(int64_t);
+    const uint64_t SizeNeeded = GetBlobSizeNeeded(Header);
     if (SizeNeeded > Entry.Size) {
       return std::nullopt;
     }
@@ -755,7 +834,7 @@ namespace DiskCache {
     }
 
     if (!HitData.CachedBlob) {
-      StoreMemoryCache(Hash, HitData.Blob);
+      StoreMemoryCache(MemoryCacheKey, HitData.Blob);
     }
     return HitData;
   }

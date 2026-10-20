@@ -49,9 +49,11 @@ namespace DiskCache {
   class IndexedDB;
 
   struct IndexEntry {
-    IndexedDB* DB;
-    uint64_t Offset;
-    uint32_t Size;
+    IndexedDB* DB {};
+    uint64_t Offset {};
+    uint32_t Size {};
+    uint32_t GuestSize {};
+    XXH128_hash_t GuestHash {};
   };
 
   struct __attribute__((packed)) BlobFixedHeader {
@@ -111,7 +113,7 @@ namespace DiskCache {
     CodeHitData& operator=(const CodeHitData&) = delete;
   };
 
-  using Index = fextl::robin_map<uint64_t, IndexEntry>;
+  using Index = fextl::robin_map<uint64_t, fextl::vector<IndexEntry>>;
 
   class FOZFile {
   public:
