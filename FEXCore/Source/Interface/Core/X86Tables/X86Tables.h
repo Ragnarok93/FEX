@@ -209,6 +209,7 @@ struct DecodedOperand {
       uint8_t Size;
       uint8_t FieldOffset;
       uint8_t Width;
+      bool SignExtend;
     } LiteralPatchable;
 
     struct {
@@ -409,6 +410,7 @@ namespace InstFlags {
   constexpr InstFlagType FLAGS_REX_W_1 = (1ULL << 29);
 
   constexpr InstFlagType FLAGS_CALL = (1ULL << 30);
+  constexpr InstFlagType FLAGS_LITERAL_PATCHABLE = (1ULL << 32);
 
   constexpr InstFlagType FLAGS_SIZE_DST_OFF = 58;
   constexpr InstFlagType FLAGS_SIZE_SRC_OFF = FLAGS_SIZE_DST_OFF + 3;

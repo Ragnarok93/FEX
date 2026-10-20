@@ -1374,14 +1374,18 @@ void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
   FEXCore::X86Tables::DecodedOperand* LiteralToPatch = nullptr;
   DataMaskType Type = DataMaskType::NONE;
 
-  // Keep the initial immediate set intentionally narrow: MOV reg,imm is safe to
-  // reload exactly without needing a second independently tracked instruction field.
-  if (DecodeInst->OPRaw >= 0xB8 && DecodeInst->OPRaw <= 0xBF) {
+  // Only table entries explicitly marked as safe for literal patching are eligible.
+  // Signed immediates retain their signed extension when reloaded from guest bytes.
+  if (DecodeInst->TableInfo &&
+      (DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_LITERAL_PATCHABLE)) {
     for (auto& Src : DecodeInst->Src) {
       if (Src.IsLiteral()) {
         LiteralToPatch = &Src;
         break;
       }
+    }
+    if (DecodeInst->Dest.IsLiteral()) {
+      LiteralToPatch = &DecodeInst->Dest;
     }
     if (LiteralToPatch) {
       Type = DataMaskType::MOV;
@@ -1449,6 +1453,8 @@ void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
     LiteralToPatch->Type = FEXCore::X86Tables::DecodedOperand::OpType::LiteralPatchable;
     LiteralToPatch->Data.LiteralPatchable.FieldOffset = LastFieldReadOffset;
     LiteralToPatch->Data.LiteralPatchable.Width = LastFieldReadSize;
+    LiteralToPatch->Data.LiteralPatchable.SignExtend =
+      DecodeInst->TableInfo && (DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_SRC_SEXT);
   }
 }
 

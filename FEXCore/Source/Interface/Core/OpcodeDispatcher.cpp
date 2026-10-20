@@ -4240,7 +4240,7 @@ AddressMode OpDispatchBuilder::DecodeAddress(const X86Tables::DecodedOp& Op, con
 
   if (Operand.IsLiteralPatchable()) {
     A.Base = _PatchableGuestData(OpSize::i64Bit, Operand.Literal(), Op->PC + Operand.Data.LiteralPatchable.FieldOffset,
-                                 Operand.Data.LiteralPatchable.Width);
+                                 Operand.Data.LiteralPatchable.Width, Operand.Data.LiteralPatchable.SignExtend);
   } else if (Operand.IsLiteral()) {
     A.Offset = Operand.Literal();
 
