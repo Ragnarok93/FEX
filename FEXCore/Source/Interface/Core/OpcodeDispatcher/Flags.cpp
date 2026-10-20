@@ -432,7 +432,7 @@ void OpDispatchBuilder::CalculateFlags_Logical(IR::OpSize SrcSize, Ref Res) {
   SetNZP_ZeroCV(SrcSize, Res);
 }
 
-void OpDispatchBuilder::CalculateFlags_ShiftLeftImmediate(IR::OpSize SrcSize, Ref UnmaskedRes, Ref Src1, uint64_t Shift) {
+void OpDispatchBuilder::CalculateFlags_ShiftLeftImmediate(IR::OpSize SrcSize, Ref UnmaskedRes, Ref Src1, uint64_t Shift, bool DoubleWide) {
   // No flags changed if shift is zero
   if (Shift == 0) {
     return;
@@ -448,7 +448,9 @@ void OpDispatchBuilder::CalculateFlags_ShiftLeftImmediate(IR::OpSize SrcSize, Re
     // 8/16-bit it might be >= SrcSizeBits, in which case CF is cleared. There's
     // nothing to do in that case since we already cleared CF above.
     const auto SrcSizeBits = IR::OpSizeAsBits(SrcSize);
-    if (Shift < SrcSizeBits) {
+    // Double-wide SHLD permits a count equal to the operand width.
+    const bool ShouldSetCF = DoubleWide ? (Shift <= SrcSizeBits) : (Shift < SrcSizeBits);
+    if (ShouldSetCF) {
       SetCFDirect(Src1, SrcSizeBits - Shift, true);
     }
   }
