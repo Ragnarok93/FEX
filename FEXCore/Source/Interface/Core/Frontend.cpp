@@ -1392,10 +1392,9 @@ void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
     }
   }
 
-  // Relative branches have one displacement field at the end of the instruction.
-  // Only patch rel32 in 64-bit guest mode; 32-bit guest branch target wrapping uses
-  // different address semantics and stays byte-exact.
-  if (BlockInfo.Is64BitMode && DecodeInst->TableInfo &&
+  // Relative near branches have a rel32 field at the end of the instruction.
+  // Cache relocations apply the guest address-width wrapping for 32-bit targets.
+  if (DecodeInst->TableInfo &&
       (DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_SETS_RIP) &&
       DecodeInst->Src[0].IsLiteral()) {
     LiteralToPatch = &DecodeInst->Src[0];

@@ -80,6 +80,20 @@ jobs:
           ctest --test-dir build --output-on-failure --timeout 302 \
             -R '(crc32_8b|a32_lods|a32_rep_lods|vcvtps2ph_zeroing|pcmp.*)\.asm$'
 
+      - name: Smoke-test disk-cache reuse for 32-bit guest code
+        env:
+          FEX_DISKCACHE: "1"
+          FEX_DISKCACHEMEMORYBUFFERMB: "0"
+          FEX_DISKCACHEPATH: ${{ runner.temp }}/fex-disk-cache-smoke
+        run: |
+          rm -rf "$FEX_DISKCACHEPATH"
+          mkdir -p "$FEX_DISKCACHEPATH"
+          ctest --test-dir build --output-on-failure --timeout 302 \
+            -R 'pcmpxstri_32bit_mode\.asm$'
+          test -n "$(find "$FEX_DISKCACHEPATH" -type f -name '*.foz' -size +0c -print -quit)"
+          ctest --test-dir build --output-on-failure --timeout 302 \
+            -R 'pcmpxstri_32bit_mode\.asm$'
+
       - name: Record build metadata
         if: always()
         run: |

@@ -626,6 +626,12 @@ static inline int64_t ReadLiveGuestDisplacement(uint64_t SiteAddress, uint8_t Va
   return static_cast<int64_t>(Raw);
 }
 
+static inline uint64_t GetLiveGuestRelativeBranchTarget(uint64_t SiteAddress, uint8_t ValueSize, bool Is64BitMode) {
+  const uint64_t Target = SiteAddress + ValueSize + ReadLiveGuestDisplacement(SiteAddress, ValueSize);
+  // EIP arithmetic wraps to 32 bits for a 32-bit guest.
+  return Is64BitMode ? Target : static_cast<uint32_t>(Target);
+}
+
 bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> Code,
                                      std::span<const FEXCore::CPU::Relocation> EntryRelocations, bool ForStorage) {
   CPU::Arm64Emitter Emitter(&CTX, Code.data(), Code.size_bytes());
@@ -693,8 +699,8 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
       if (Reloc.GuestPatchableData.ValueSize != 4) {
         return false;
       }
-      const uint64_t Target = Reloc.GuestPatchableData.SiteAddress + Reloc.GuestPatchableData.ValueSize +
-        ReadLiveGuestDisplacement(Reloc.GuestPatchableData.SiteAddress, Reloc.GuestPatchableData.ValueSize);
+      const uint64_t Target = GetLiveGuestRelativeBranchTarget(
+        Reloc.GuestPatchableData.SiteAddress, Reloc.GuestPatchableData.ValueSize, CTX.Config.Is64BitMode);
       Emitter.dc64(Target);
       break;
     }
@@ -702,8 +708,8 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
       if (Reloc.GuestPatchableData.ValueSize != 4) {
         return false;
       }
-      const uint64_t Target = Reloc.GuestPatchableData.SiteAddress + Reloc.GuestPatchableData.ValueSize +
-        ReadLiveGuestDisplacement(Reloc.GuestPatchableData.SiteAddress, Reloc.GuestPatchableData.ValueSize);
+      const uint64_t Target = GetLiveGuestRelativeBranchTarget(
+        Reloc.GuestPatchableData.SiteAddress, Reloc.GuestPatchableData.ValueSize, CTX.Config.Is64BitMode);
       Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestPatchableData.RegisterIndex), Target,
                            CPU::Arm64Emitter::PadType::DOPAD);
       break;

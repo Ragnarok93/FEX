@@ -24,6 +24,10 @@ pcmpestri xmm2, xmm3, 0
 
 pcmpistri xmm2, xmm3, 0
 
+; Force a near rel32 branch to exercise cache-time target patching.
+jmp near .after_branch
+times 160 db 0x90
+.after_branch:
 hlt
 
 align 16
