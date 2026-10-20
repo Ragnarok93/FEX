@@ -225,7 +225,7 @@ namespace DiskCache {
     uint64_t MemoryCacheCurrentBytes = 0;
 
     fextl::shared_ptr<fextl::vector<uint8_t>> LookupMemoryCache(uint64_t Key);
-    void StoreMemoryCache(uint64_t Key, std::span<const uint8_t> Blob);
+    fextl::shared_ptr<fextl::vector<uint8_t>> StoreMemoryCache(uint64_t Key, fextl::vector<uint8_t>&& Blob);
 
     // The Writer holds references to all the fields above and must be destroyed first.
     fextl::unique_ptr<WorkQueueThread> Writer;

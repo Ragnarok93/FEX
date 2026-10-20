@@ -682,14 +682,15 @@ namespace DiskCache {
     return It->second.Blob;
   }
 
-  void DiskCache::StoreMemoryCache(uint64_t Key, std::span<const uint8_t> Blob) {
+  fextl::shared_ptr<fextl::vector<uint8_t>> DiskCache::StoreMemoryCache(uint64_t Key, fextl::vector<uint8_t>&& Blob) {
     const uint64_t MaxBytes = MemoryCacheSize;
     if (MaxBytes == 0 || Blob.empty() || Blob.size() > MaxBytes) {
-      return;
+      // Do not consume the caller's buffer when it does not fit in the LRU.
+      return {};
     }
 
-    auto CachedBlob = fextl::make_shared<fextl::vector<uint8_t>>();
-    CachedBlob->assign(Blob.begin(), Blob.end());
+    // Adopt the existing buffer instead of copying every byte into a second allocation.
+    auto CachedBlob = fextl::make_shared<fextl::vector<uint8_t>>(std::move(Blob));
 
     std::lock_guard Guard(MemoryCacheLock);
     auto Existing = MemoryCacheEntries.find(Key);
@@ -712,6 +713,7 @@ namespace DiskCache {
     MemoryCacheLRU.push_front(Key);
     MemoryCacheEntries.emplace(Key, MemoryCacheEntry {CachedBlob, MemoryCacheLRU.begin()});
     MemoryCacheCurrentBytes += CachedBlob->size();
+    return CachedBlob;
   }
 
   std::optional<CodeHitData> DiskCache::Lookup(Core::InternalThreadState* Thread, const ExecutableFileSectionInfo& Region, uint64_t GuestRIP) {
@@ -843,7 +845,16 @@ namespace DiskCache {
     }
 
     if (!HitData.CachedBlob) {
-      StoreMemoryCache(MemoryCacheKey, HitData.Blob);
+      // Move into the LRU only after header/relocation validation has succeeded.
+      // Rebuild spans after adoption because they must refer to the shared allocation.
+      auto CachedBlob = StoreMemoryCache(MemoryCacheKey, std::move(HitData.Blob));
+      if (CachedBlob) {
+        HitData.CachedBlob = std::move(CachedBlob);
+        uint8_t* CachedData = HitData.CachedBlob->data();
+        HitData.HostCode = {CachedData + sizeof(Header), Header.HostSize};
+        HitData.EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(CachedData + sizeof(Header) + Header.HostSize),
+                               Header.EntryPointCount};
+      }
     }
     return HitData;
   }
