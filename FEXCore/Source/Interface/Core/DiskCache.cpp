@@ -595,6 +595,48 @@ namespace DiskCache {
     return XXH3_64bits(&BlobKeyBytes, sizeof(BlobKeyBytes));
   }
 
+  fextl::shared_ptr<fextl::vector<uint8_t>> DiskCache::LookupMemoryCache(uint64_t Key) {
+    std::lock_guard Guard(MemoryCacheLock);
+    auto It = MemoryCacheEntries.find(Key);
+    if (It == MemoryCacheEntries.end()) {
+      return {};
+    }
+
+    MemoryCacheLRU.splice(MemoryCacheLRU.begin(), MemoryCacheLRU, It->second.LRUPosition);
+    return It->second.Blob;
+  }
+
+  void DiskCache::StoreMemoryCache(uint64_t Key, std::span<const uint8_t> Blob) {
+    const uint64_t MaxBytes = MemoryCacheSize;
+    if (MaxBytes == 0 || Blob.empty() || Blob.size() > MaxBytes) {
+      return;
+    }
+
+    auto CachedBlob = fextl::make_shared<fextl::vector<uint8_t>>();
+    CachedBlob->assign(Blob.begin(), Blob.end());
+
+    std::lock_guard Guard(MemoryCacheLock);
+    auto Existing = MemoryCacheEntries.find(Key);
+    if (Existing != MemoryCacheEntries.end()) {
+      MemoryCacheLRU.splice(MemoryCacheLRU.begin(), MemoryCacheLRU, Existing->second.LRUPosition);
+      return;
+    }
+
+    while (!MemoryCacheLRU.empty() && MemoryCacheCurrentBytes > MaxBytes - CachedBlob->size()) {
+      auto Last = std::prev(MemoryCacheLRU.end());
+      auto Entry = MemoryCacheEntries.find(*Last);
+      if (Entry != MemoryCacheEntries.end()) {
+        MemoryCacheCurrentBytes -= Entry->second.Blob->size();
+        MemoryCacheEntries.erase(Entry);
+      }
+      MemoryCacheLRU.erase(Last);
+    }
+
+    MemoryCacheLRU.push_front(Key);
+    MemoryCacheEntries.emplace(Key, MemoryCacheEntry {CachedBlob, MemoryCacheLRU.begin()});
+    MemoryCacheCurrentBytes += CachedBlob->size();
+  }
+
   std::optional<CodeHitData> DiskCache::Lookup(Core::InternalThreadState* Thread, const ExecutableFileSectionInfo& Region, uint64_t GuestRIP) {
     if (!IsReadingDiskCache()) {
       return std::nullopt;
@@ -615,18 +657,24 @@ namespace DiskCache {
       // we can't hold onto the iterator, the map may shift while we don't hold the lock
       Entry = It->second;
     }
-    // found a key hash match, could still be a miss, read the blob and verify more
+    // Found a key hash match; serve it from the bounded read LRU when available.
     CodeHitData HitData;
-    HitData.Blob.resize(Entry.Size);
-    if (!Entry.DB->ReadCacheBlob(Entry.Offset, HitData.Blob)) {
-      return std::nullopt;
+    auto CachedBlob = LookupMemoryCache(Hash);
+    if (CachedBlob && CachedBlob->size() == Entry.Size) {
+      HitData.CachedBlob = std::move(CachedBlob);
+    } else {
+      HitData.Blob.resize(Entry.Size);
+      if (!Entry.DB->ReadCacheBlob(Entry.Offset, HitData.Blob)) {
+        return std::nullopt;
+      }
     }
+    uint8_t* BlobData = HitData.CachedBlob ? HitData.CachedBlob->data() : HitData.Blob.data();
 
     if (Entry.Size < sizeof(BlobFixedHeader)) {
       return std::nullopt;
     }
     BlobFixedHeader Header;
-    memcpy(&Header, HitData.Blob.data(), sizeof(Header));
+    memcpy(&Header, BlobData, sizeof(Header));
 
     // do we have enough room in our live code to even hash GuestSize worth?
     if (RangeInfo.Size == 0 || RangeInfo.Base > GuestRIP) {
@@ -659,11 +707,11 @@ namespace DiskCache {
       return std::nullopt;
     }
 
-    HitData.HostCode = {HitData.Blob.data() + sizeof(Header), Header.HostSize};
-    HitData.EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(HitData.Blob.data() + sizeof(Header) + Header.HostSize), Header.EntryPointCount};
+    HitData.HostCode = {BlobData + sizeof(Header), Header.HostSize};
+    HitData.EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(BlobData + sizeof(Header) + Header.HostSize), Header.EntryPointCount};
 
     auto* SmallRelocs = reinterpret_cast<const BlobSmallRelocation*>(
-      HitData.Blob.data() + sizeof(Header) + Header.HostSize + Header.EntryPointCount * sizeof(BlobEntryPoint));
+      BlobData + sizeof(Header) + Header.HostSize + Header.EntryPointCount * sizeof(BlobEntryPoint));
     auto* ThunkRelocs = reinterpret_cast<const BlobThunkRelocation*>(
       reinterpret_cast<const uint8_t*>(SmallRelocs) + Header.SmallRelocCount * sizeof(BlobSmallRelocation));
 
@@ -703,6 +751,9 @@ namespace DiskCache {
       HitData.GuestPages.push_back(GuestRIP + PageOffsets[i]);
     }
 
+    if (!HitData.CachedBlob) {
+      StoreMemoryCache(Hash, HitData.Blob);
+    }
     return HitData;
   }
 
