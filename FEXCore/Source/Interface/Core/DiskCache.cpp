@@ -898,6 +898,12 @@ namespace DiskCache {
         if (Target >= Region.BeginVA && Target < Region.EndVA) {
           continue;
         }
+        // Relocations into another PT_LOAD segment or .bss in the same ELF image
+        // are stable under relocation of the image as a whole.
+        if (Region.FileInfo.MappedSize && Target >= Region.FileStartVA &&
+            Target - Region.FileStartVA < Region.FileInfo.MappedSize) {
+          continue;
+        }
         auto TargetSection = CTX->SyscallHandler->LookupExecutableFileSection(Thread, Target);
         if (!TargetSection || TargetSection->FileInfo.FileId != Region.FileInfo.FileId) {
           // we don't know where it's pointing, so we don't know how to encode the offset, so we can't cache atm

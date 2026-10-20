@@ -50,6 +50,8 @@ struct ExecutableFileInfo {
   uint64_t FileId = 0;
   fextl::string Filename;
   fextl::robin_map<uint32_t, GuestRelocationType> Relocations;
+  // Span of the PT_LOAD segments, including zero-filled memory such as .bss.
+  uint64_t MappedSize = 0;
 };
 
 // Information associated with a specific section of an executable file

@@ -211,6 +211,24 @@ struct ReadELFHeadersResult {
   bool HasCodeRelocations;
 };
 
+// Return the address span of the ELF PT_LOAD segments. A malformed overflowing
+// segment disables the optimization rather than accidentally widening the range.
+static uint64_t GetELFImageMappedSize(const fextl::vector<Elf64_Phdr>& ProgramHeaders) {
+  uint64_t MinAddress = ~uint64_t {};
+  uint64_t MaxAddress = 0;
+  for (const auto& ProgramHeader : ProgramHeaders) {
+    if (ProgramHeader.p_type != PT_LOAD) {
+      continue;
+    }
+    if (ProgramHeader.p_memsz > (~uint64_t {} - ProgramHeader.p_vaddr)) {
+      return 0;
+    }
+    MinAddress = std::min(MinAddress, ProgramHeader.p_vaddr);
+    MaxAddress = std::max(MaxAddress, ProgramHeader.p_vaddr + ProgramHeader.p_memsz);
+  }
+  return MaxAddress > MinAddress ? MaxAddress - MinAddress : 0;
+}
+
 static void IncorporateBuildIDIntoFileId(uint64_t& FileId, std::span<const uint8_t> BuildID) {
   if (BuildID.empty()) {
     return;
@@ -595,6 +613,7 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
         if (CheckForElfFile) {
           auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length}, true, EnableDiskCache);
           Resource->ProgramHeaders = std::move(ELFResult.ProgramHeaders);
+          Resource->MappedFile->MappedSize = GetELFImageMappedSize(Resource->ProgramHeaders);
           Resource->MappedFile->Relocations = std::move(ELFResult.Relocations);
           Resource->RequiresDelayedCacheLoad = ELFResult.HasCodeRelocations;
           if (EnableDiskCache) {
@@ -616,6 +635,7 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
                                                                               "file");
         } else if (CheckForDiskCacheFile) {
           auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length}, false, true);
+          Resource->MappedFile->MappedSize = GetELFImageMappedSize(ELFResult.ProgramHeaders);
           if (EnableDiskCache) {
             IncorporateBuildIDIntoFileId(Resource->MappedFile->FileId, ELFResult.BuildID);
           }
