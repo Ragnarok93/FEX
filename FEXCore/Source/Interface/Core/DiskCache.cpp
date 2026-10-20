@@ -19,6 +19,7 @@
 #include <atomic>
 #include <filesystem>
 #include <iterator>
+#include <utility>
 
 namespace FEXCore {
 
@@ -292,7 +293,7 @@ namespace DiskCache {
         // guest hash rather than permanently pinning the first variant seen in this DB.
         auto& Entries = CacheIndex[IndexBlobPayload->hash];
         const auto Duplicate = std::find_if(Entries.begin(), Entries.end(), [&](const IndexEntry& Entry) {
-          return Entry.GuestSize == BlobHeader.GuestSize &&
+          return Entry.GuestSize == BlobHeader.GuestSize && Entry.GuestExtents == GuestExtents &&
                  std::memcmp(&Entry.GuestHash, &BlobHeader.GuestHash, sizeof(BlobHeader.GuestHash)) == 0;
         });
         if (Duplicate == Entries.end() && Entries.size() < MAX_LOOKUP_KEY_VARIANTS) {
@@ -352,6 +353,7 @@ namespace DiskCache {
     const bool IsMetadataKey = std::all_of(Key.bytes, Key.bytes + sizeof(Key.bytes), [](uint8_t Byte) { return Byte == 0xFF; });
     uint64_t Hash {};
     BlobFixedHeader BlobHeader {};
+    fextl::vector<uint32_t> GuestExtents;
     if (!IsMetadataKey) {
       const char* KeyBegin = reinterpret_cast<const char*>(Key.bytes);
       const char* KeyEnd = reinterpret_cast<const char*>(&Key.bytes[16]);
@@ -365,7 +367,7 @@ namespace DiskCache {
           static_cast<uint64_t>(BlobHeader.GuestExtentsCount / 2) > BlobHeader.GuestSize) {
         return false;
       }
-      fextl::vector<uint32_t> GuestExtents(BlobHeader.GuestExtentsCount);
+      GuestExtents.resize(BlobHeader.GuestExtentsCount);
       memcpy(GuestExtents.data(), Blob.data() + sizeof(BlobHeader), GuestExtents.size() * sizeof(uint32_t));
       if (!ValidateGuestExtents(GuestExtents, BlobHeader.GuestSize)) {
         return false;
@@ -383,7 +385,7 @@ namespace DiskCache {
         return !It->second.empty();
       }
       return std::any_of(It->second.begin(), It->second.end(), [&](const IndexEntry& Entry) {
-        return Entry.GuestSize == BlobHeader.GuestSize &&
+        return Entry.GuestSize == BlobHeader.GuestSize && Entry.GuestExtents == GuestExtents &&
                std::memcmp(&Entry.GuestHash, &BlobHeader.GuestHash, sizeof(BlobHeader.GuestHash)) == 0;
       });
     };
@@ -480,8 +482,6 @@ namespace DiskCache {
       if (IsMetadataKey) {
         Entries.push_back({this, BlobOffset, static_cast<uint32_t>(Blob.size()), 0, {}});
       } else {
-        fextl::vector<uint32_t> GuestExtents(BlobHeader.GuestExtentsCount);
-        memcpy(GuestExtents.data(), Blob.data() + sizeof(BlobHeader), GuestExtents.size() * sizeof(uint32_t));
         Entries.push_back({this, BlobOffset, static_cast<uint32_t>(Blob.size()), BlobHeader.GuestSize, BlobHeader.GuestHash,
                            std::move(GuestExtents)});
       }
@@ -696,14 +696,21 @@ namespace DiskCache {
 
     Thread->FrontendDecoder->DecodeInstructionsAtEntry(Thread, reinterpret_cast<const uint8_t*>(GuestRIP), GuestRIP, 4);
     const auto* DecodedInfo = Thread->FrontendDecoder->GetDecodedBlockInfo();
+    if (!DecodedInfo || DecodedInfo->Blocks.empty()) {
+      Thread->FrontendDecoder->DelayedDisownBuffer();
+      return std::nullopt;
+    }
     XXH3_state_t HashState;
     XXH3_64bits_reset(&HashState);
-    bool Valid = DecodedInfo && !DecodedInfo->Blocks.empty();
+    bool Valid = true;
     for (const auto& SubBlock : DecodedInfo->Blocks) {
-      if (SubBlock.BlockStatus != Frontend::Decoder::DecodedBlockStatus::SUCCESS || SubBlock.Entry < GuestRIP) {
+      if (SubBlock.BlockStatus != Frontend::Decoder::DecodedBlockStatus::SUCCESS ||
+          SubBlock.Size > std::numeric_limits<uint64_t>::max() - SubBlock.Entry) {
         Valid = false;
         break;
       }
+      // Unsigned relative offsets are intentional: backward branch targets remain
+      // deterministic relative to the candidate entrypoint.
       const uint64_t BlockOffset = SubBlock.Entry - GuestRIP;
       const uint64_t BlockSize = SubBlock.Size;
       XXH3_64bits_update(&HashState, &BlockOffset, sizeof(BlockOffset));
@@ -1010,6 +1017,12 @@ namespace DiskCache {
       return false;
     }
     if (!DecodedBlockInfo) {
+      return false;
+    }
+    if ((!Region || Region->FileStartVA == 0) &&
+        reinterpret_cast<uint64_t>(GuestCode.data()) != GuestRIP) {
+      // Anonymous entrypoint hashing/rebasing uses GuestRIP as the blob base;
+      // refuse blocks whose frontend code span begins at a different address.
       return false;
     }
 
