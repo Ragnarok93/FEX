@@ -1485,7 +1485,11 @@ void Decoder::PruneInlinedBranchDataMasks() {
     }
 
     // The detector only marks rel32 branches for cache patching.
-    const uint64_t Target = NextInst + static_cast<int32_t>(LastInst.Src[0].Literal());
+    uint64_t Target = NextInst + static_cast<int32_t>(LastInst.Src[0].Literal());
+    if (!BlockInfo.Is64BitMode) {
+      // Relative branches use EIP arithmetic in 32-bit guest mode.
+      Target = static_cast<uint32_t>(Target);
+    }
     auto TargetIt = std::lower_bound(BlockInfo.Blocks.begin(), BlockInfo.Blocks.end(), Target,
                                      [](const auto& Candidate, uint64_t Address) { return Candidate.Entry < Address; });
     if (TargetIt != BlockInfo.Blocks.end() && TargetIt->Entry == Target) {
