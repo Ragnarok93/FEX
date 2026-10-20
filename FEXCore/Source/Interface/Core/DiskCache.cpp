@@ -682,7 +682,7 @@ namespace DiskCache {
 
   std::optional<uint64_t> DiskCache::MakeCodeKey(Core::InternalThreadState* Thread,
                                                        const std::optional<ExecutableFileSectionInfo>& Region,
-                                                       uint64_t GuestRIP) {
+                                                       uint64_t GuestRIP, bool DisownDecoderBuffer) {
     if (Region && Region->FileStartVA != 0) {
       return MakeFileBackedCodeKey(GuestRIP, *Region);
     }
@@ -702,7 +702,9 @@ namespace DiskCache {
     Thread->FrontendDecoder->DecodeInstructionsAtEntry(Thread, reinterpret_cast<const uint8_t*>(GuestRIP), GuestRIP, 4);
     const auto* DecodedInfo = Thread->FrontendDecoder->GetDecodedBlockInfo();
     if (!DecodedInfo || DecodedInfo->Blocks.empty()) {
-      Thread->FrontendDecoder->DelayedDisownBuffer();
+      if (DisownDecoderBuffer) {
+        Thread->FrontendDecoder->DelayedDisownBuffer();
+      }
       return std::nullopt;
     }
     XXH3_state_t HashState;
@@ -740,7 +742,12 @@ namespace DiskCache {
         XXH3_64bits_update(&HashState, reinterpret_cast<const uint8_t*>(HashStart), BlockEnd - HashStart);
       }
     }
-    Thread->FrontendDecoder->DelayedDisownBuffer();
+    // Lookup callers own decoder-buffer cleanup: a cache hit disowns it in
+    // CompileBlock, while a miss reuses it during IR generation. Store runs
+    // after compilation and must release its temporary decode buffer here.
+    if (DisownDecoderBuffer) {
+      Thread->FrontendDecoder->DelayedDisownBuffer();
+    }
     if (!Valid) {
       return std::nullopt;
     }
@@ -829,7 +836,7 @@ namespace DiskCache {
     if (!IsReadingDiskCache()) {
       return std::nullopt;
     }
-    const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP);
+    const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP, false);
     if (!CodeKeyValue) {
       return std::nullopt;
     }
@@ -1240,7 +1247,7 @@ namespace DiskCache {
     Blob.resize(TotalSize);
     uint8_t* BlobData = Blob.data();
 
-    const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP);
+    const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP, true);
     if (!CodeKeyValue) {
       return false;
     }
