@@ -210,7 +210,8 @@ namespace DiskCache {
   private:
     bool OpenCacheDB(const fextl::string& CacheDBName, bool ReadOnly, std::span<const uint8_t> ExpectedMetadata);
     uint64_t MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t ModuleOffset, bool Writable, bool MonoBackpatcher);
-    std::optional<uint64_t> MakeCodeKey(Core::InternalThreadState* Thread, const std::optional<ExecutableFileSectionInfo>& Region, uint64_t GuestRIP);
+    std::optional<uint64_t> MakeCodeKey(Core::InternalThreadState* Thread, const std::optional<ExecutableFileSectionInfo>& Region, uint64_t GuestRIP,
+                                           bool DisownDecoderBuffer);
 
     FEXCore::Context::ContextImpl* CTX;
     // Bumped for the serialized guest extents and patchable immediate/branch/CRC relocation records.
