@@ -170,6 +170,8 @@ namespace DiskCache {
     FOZFile IndexFOZ;
     bool ReadOnly = false;
     uint64_t MaxSizeBytes = MAX_CACHE_SIZE_BYTES;
+
+    FEX_CONFIG_OPT(MaxFileSize, DISKCACHEMAXFILESIZE);
   };
 
   class DiskCache {
