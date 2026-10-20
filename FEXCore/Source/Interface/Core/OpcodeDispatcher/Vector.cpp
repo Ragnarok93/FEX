@@ -5493,13 +5493,13 @@ Ref OpDispatchBuilder::PCMPXSTRXEqualAny(OpSize ElementSize, Ref Src1, Ref Src2,
   for (uint32_t i = 1; i < NumElements; i++) {
     Ref Src1Element = _VDupElement(OpSize::i128Bit, ElementSize, SanitizedSrc1, i);
     Ref ElementMatches = _VCMPEQ(OpSize::i128Bit, ElementSize, Src2, Src1Element);
-    Matches = _VOr(OpSize::i128Bit, Matches, ElementMatches);
+    Matches = _VOr(OpSize::i128Bit, ElementSize, Matches, ElementMatches);
   }
 
   // An empty Src1 matches nothing, and invalid Src2 elements never match.
   Ref Src1NotEmpty = _VDupElement(OpSize::i128Bit, ElementSize, Src1ValidElements, 0);
-  Matches = _VAnd(OpSize::i128Bit, Matches, Src1NotEmpty);
-  return _VAnd(OpSize::i128Bit, Matches, Src2ValidElements);
+  Matches = _VAnd(OpSize::i128Bit, ElementSize, Matches, Src1NotEmpty);
+  return _VAnd(OpSize::i128Bit, ElementSize, Matches, Src2ValidElements);
 }
 
 Ref OpDispatchBuilder::PCMPXSTRXRanges(OpSize ElementSize, Ref Src1, Ref Src2, Ref Src1ValidElements, Ref Src2ValidElements, bool IsSigned) {
@@ -5517,25 +5517,25 @@ Ref OpDispatchBuilder::PCMPXSTRXRanges(OpSize ElementSize, Ref Src1, Ref Src2, R
     Ref UpperBound = _VDupElement(OpSize::i128Bit, ElementSize, Src1, i + 1);
     Ref BelowLower = GreaterThan(LowerBound, Src2);
     Ref AboveUpper = GreaterThan(Src2, UpperBound);
-    Ref OutsideRange = _VOr(OpSize::i128Bit, BelowLower, AboveUpper);
+    Ref OutsideRange = _VOr(OpSize::i128Bit, ElementSize, BelowLower, AboveUpper);
 
     // A range is only valid if its upper bound is a valid Src1 element.
     Ref RangeValid = _VDupElement(OpSize::i128Bit, ElementSize, Src1ValidElements, i + 1);
-    Ref InRange = _VAndn(OpSize::i128Bit, RangeValid, OutsideRange);
-    Result = Result ? _VOr(OpSize::i128Bit, Result, InRange) : InRange;
+    Ref InRange = _VAndn(OpSize::i128Bit, ElementSize, RangeValid, OutsideRange);
+    Result = Result ? _VOr(OpSize::i128Bit, ElementSize, Result, InRange) : InRange;
   }
 
   // Invalid Src2 elements never match.
-  return _VAnd(OpSize::i128Bit, Result, Src2ValidElements);
+  return _VAnd(OpSize::i128Bit, ElementSize, Result, Src2ValidElements);
 }
 
 Ref OpDispatchBuilder::PCMPXSTRXEqualEach(OpSize ElementSize, Ref Src1, Ref Src2, Ref Src1ValidElements, Ref Src2ValidElements) {
   // Elements match when both are valid and equal, or when both are invalid.
   Ref Equal = _VCMPEQ(OpSize::i128Bit, ElementSize, Src1, Src2);
-  Ref BothValid = _VAnd(OpSize::i128Bit, Src1ValidElements, Src2ValidElements);
-  Ref EitherValid = _VOr(OpSize::i128Bit, Src1ValidElements, Src2ValidElements);
-  Ref ValidMatches = _VAnd(OpSize::i128Bit, Equal, BothValid);
-  return _VOrn(OpSize::i128Bit, ValidMatches, EitherValid);
+  Ref BothValid = _VAnd(OpSize::i128Bit, ElementSize, Src1ValidElements, Src2ValidElements);
+  Ref EitherValid = _VOr(OpSize::i128Bit, ElementSize, Src1ValidElements, Src2ValidElements);
+  Ref ValidMatches = _VAnd(OpSize::i128Bit, ElementSize, Equal, BothValid);
+  return _VOrn(OpSize::i128Bit, ElementSize, ValidMatches, EitherValid);
 }
 
 Ref OpDispatchBuilder::PCMPXSTRXEqualOrdered(OpSize ElementSize, Ref Src1, Ref Src2, Ref Src1Length, Ref Src2Length, Ref Src1ValidElements,
@@ -5552,9 +5552,9 @@ Ref OpDispatchBuilder::PCMPXSTRXEqualOrdered(OpSize ElementSize, Ref Src1, Ref S
 
     // Row | ~RowValid: the row itself for valid needle elements, all ones otherwise.
     Ref RowValid = _VDupElement(OpSize::i128Bit, ElementSize, Src1ValidElements, i);
-    Row = _VOrn(OpSize::i128Bit, Row, RowValid);
+    Row = _VOrn(OpSize::i128Bit, ElementSize, Row, RowValid);
 
-    Result = Result ? _VAnd(OpSize::i128Bit, Result, Row) : Row;
+    Result = Result ? _VAnd(OpSize::i128Bit, ElementSize, Result, Row) : Row;
   }
 
   // Clear positions that run into invalid Src2 elements, unless Src2 is fully valid or Src1 is empty.
@@ -5564,7 +5564,7 @@ Ref OpDispatchBuilder::PCMPXSTRXEqualOrdered(OpSize ElementSize, Ref Src1, Ref S
   FirstClearedPosition =
     _Select(OpSize::i32Bit, OpSize::i32Bit, CondClass::EQ, Src1Length, Constant(0), Constant(NumElements), FirstClearedPosition);
   Ref FirstClearedPositionVector = _VDupFromGPR(OpSize::i128Bit, ElementSize, FirstClearedPosition);
-  return _VAnd(OpSize::i128Bit, Result, _VCMPGT(OpSize::i128Bit, ElementSize, FirstClearedPositionVector, Indices));
+  return _VAnd(OpSize::i128Bit, ElementSize, Result, _VCMPGT(OpSize::i128Bit, ElementSize, FirstClearedPositionVector, Indices));
 }
 
 
@@ -5662,9 +5662,9 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
   // Invert the matches if the polarity is negative or negative masked,
   // see section 4.1.4 in the Intel SDM.
   if (Polarity == CPU::Polarity::Negative) {
-    Matches = _VNot(OpSize::i128Bit, Matches);
+    Matches = _VNot(OpSize::i128Bit, ElementSize, Matches);
   } else if (Polarity == CPU::Polarity::NegativeMasked) {
-    Matches = _VXor(OpSize::i128Bit, Matches, Src2ValidElementsMask);
+    Matches = _VXor(OpSize::i128Bit, ElementSize, Matches, Src2ValidElementsMask);
   }
 
   // Compute the flags and result
@@ -5692,7 +5692,7 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
       // If the elements are words, truncate to bytes first.
       Result = IsWords ? _VUnZip(OpSize::i128Bit, OpSize::i8Bit, Matches, Zero) : Matches;
       // Now repeat this pattern until we collapse each byte into a single bit.
-      Result = _VAnd(OpSize::i128Bit, Result, BitPositions);
+      Result = _VAnd(OpSize::i128Bit, OpSize::i8Bit, Result, BitPositions);
       Result = _VAddP(OpSize::i128Bit, OpSize::i8Bit, Result, Zero);
       Result = _VAddP(OpSize::i128Bit, OpSize::i8Bit, Result, Zero);
       Result = _VAddP(OpSize::i128Bit, OpSize::i8Bit, Result, Zero);
@@ -5717,7 +5717,7 @@ void OpDispatchBuilder::PCMPXSTRXOpImpl(OpcodeArgs, bool IsExplicit, bool IsMask
     // Most significant rather than least significant index.
     if (OutputSelection) {
       // The max is also 0 when nothing matched, LowestMatch tells those apart.
-      Ref Candidates = _VAnd(OpSize::i128Bit, Indices, Matches);
+      Ref Candidates = _VAnd(OpSize::i128Bit, ElementSize, Indices, Matches);
       Ref HighestMatchVector = _VUMaxV(OpSize::i128Bit, ElementSize, Candidates);
       Ref HighestMatch = _VExtractToGPR(OpSize::i128Bit, ElementSize, HighestMatchVector, 0);
       Result = _Select(OpSize::i32Bit, OpSize::i32Bit, CondClass::EQ, LowestMatch, Constant(NumElements), Constant(NumElements), HighestMatch);
