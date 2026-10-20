@@ -345,8 +345,10 @@ namespace DiskCache {
     }
     const uint64_t PendingCacheBytes = RecordOverhead + static_cast<uint64_t>(Blob.size());
     const uint64_t PendingIndexBytes = RecordOverhead + IndexEntryBytes;
-    if (!CanStoreWithinCapacity(MaxSizeBytes, static_cast<uint64_t>(CacheBytes), static_cast<uint64_t>(IndexBytes),
-                                PendingCacheBytes, PendingIndexBytes)) {
+    // DISKCACHEMAXFILESIZE limits the primary cache data file. The smaller index is
+    // independently guarded against integer overflow, but is not charged to the data-file budget.
+    if (!CanStoreWithinCapacity(MaxSizeBytes, static_cast<uint64_t>(CacheBytes), 0, PendingCacheBytes, 0) ||
+        !CanStoreWithinCapacity(U64Max, static_cast<uint64_t>(IndexBytes), 0, PendingIndexBytes, 0)) {
       CacheFOZ.Unlock();
       IndexFOZ.Unlock();
       // Capacity exhaustion is a cache miss policy decision, not an execution failure.
