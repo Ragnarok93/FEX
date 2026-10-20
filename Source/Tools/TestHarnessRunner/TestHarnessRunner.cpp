@@ -15,6 +15,7 @@ $end_info$
 #include "LinuxSyscalls/x32/Syscalls.h"
 #include "LinuxSyscalls/x64/Syscalls.h"
 #include "LinuxSyscalls/SignalDelegator.h"
+#include <ucontext.h>
 #endif
 
 #include "Common/HostFeatures.h"
@@ -122,7 +123,17 @@ void RegisterLongJumpHandler(FEX::HLE::SignalDelegator* Handler) {
     SIGSEGV,
     [](FEXCore::Core::InternalThreadState* Thread, int Signal, void* info, void* ucontext) {
       constexpr uint8_t HLT = 0xF4;
-      if (reinterpret_cast<uint8_t*>(Thread->CurrentFrame->State.rip)[0] != HLT) {
+      const uint64_t GuestRIP = Thread->CurrentFrame->State.rip;
+      if (reinterpret_cast<uint8_t*>(GuestRIP)[0] != HLT) {
+        const auto* SignalInfo = static_cast<const siginfo_t*>(info);
+        uintptr_t HostPC = 0;
+#if defined(__aarch64__)
+        HostPC = reinterpret_cast<const ucontext_t*>(ucontext)->uc_mcontext.pc;
+#endif
+        std::fprintf(stderr,
+                     "[FEX-CACHE-FAULT] signal=%d guest-rip=%llx host-pc=%llx fault-address=%p signal-code=%d\\n",
+                     Signal, static_cast<unsigned long long>(GuestRIP), static_cast<unsigned long long>(HostPC),
+                     SignalInfo ? SignalInfo->si_addr : nullptr, SignalInfo ? SignalInfo->si_code : 0);
         DidFault = true;
         return false;
       }
