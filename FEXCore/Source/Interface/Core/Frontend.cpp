@@ -1510,8 +1510,7 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
 
   bool EntryBlock {true};
   bool FinalInstruction {false};
-  const bool WantsDataMasks = (CTX->DiskCache.IsReadingDiskCache() || CTX->DiskCache.IsWritingDiskCache()) &&
-                              CTX->Config.SMCChecks != FEXCore::Config::CONFIG_SMC_FULL;
+  const bool WantsDataMasks = CTX->DiskCache.IsReadingDiskCache() || CTX->DiskCache.IsWritingDiskCache();
 
   while (!FinalInstruction && !BlocksToDecode.empty()) {
     auto BlockDecodeIt = BlocksToDecode.begin();
@@ -1640,9 +1639,6 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
           // We don't want to short circuit this since we want to calculate our ranges still
           // NOTE: This will invalidate BlockIt, this is fine as we immediately break from the loop and EraseBlock cannot be true
           BlockIt->ForceFullSMCDetection = CTX->AreMonoHacksActive() && IsBranchMonoTailcall(BlockIt->NumInstructions);
-          if (BlockIt->ForceFullSMCDetection) {
-            BlockIt->DataMasks.clear();
-          }
           BranchTargetInMultiblockRange();
         }
 

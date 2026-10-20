@@ -21,6 +21,9 @@
 #include <xxhash.h>
 
 #include <fstream>
+#if defined(ARCHITECTURE_arm64)
+#include <arm_acle.h>
+#endif
 
 namespace FEXCore {
 
@@ -606,6 +609,27 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
   LogMan::Msg::IFmt("\tSuccessfully validated cache");
 }
 
+static inline uint32_t crc32(const uint8_t* Ptr, size_t Size) {
+#if defined(ARCHITECTURE_arm64)
+  uint32_t Result {};
+#define FEX_DO_CRC(type, suffix)                                             \
+  while (Size >= sizeof(type)) {                                              \
+    Result = __crc32##suffix(Result, *reinterpret_cast<const type*>(Ptr));   \
+    Ptr += sizeof(type);                                                      \
+    Size -= sizeof(type);                                                     \
+  }
+  FEX_DO_CRC(uint64_t, d);
+  FEX_DO_CRC(uint32_t, w);
+  FEX_DO_CRC(uint16_t, h);
+  FEX_DO_CRC(uint8_t, b);
+#undef FEX_DO_CRC
+  return Result;
+#else
+  // Patchable CRC relocations are used by the ARM64 JIT.
+  return 0;
+#endif
+}
+
 bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> Code,
                                      std::span<const FEXCore::CPU::Relocation> EntryRelocations, bool ForStorage) {
   CPU::Arm64Emitter Emitter(&CTX, Code.data(), Code.size_bytes());
@@ -655,6 +679,16 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
           Value = (Value ^ SignBit) - SignBit;
         }
       }
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestPatchableData.RegisterIndex), Value,
+                           CPU::Arm64Emitter::PadType::DOPAD);
+      break;
+    }
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE: {
+      if (Reloc.GuestPatchableData.ValueSize == 0 || Reloc.GuestPatchableData.ValueSize > 16) {
+        return false;
+      }
+      const uint64_t Value = ForStorage ? 0 :
+        crc32(reinterpret_cast<const uint8_t*>(Reloc.GuestPatchableData.SiteAddress), Reloc.GuestPatchableData.ValueSize);
       Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestPatchableData.RegisterIndex), Value,
                            CPU::Arm64Emitter::PadType::DOPAD);
       break;

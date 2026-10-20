@@ -943,7 +943,8 @@ namespace DiskCache {
         Reloc.GuestRIP.RegisterIndex = SmallReloc.RIPMove.RegisterIndex;
         Reloc.GuestRIP.GuestRIP = SmallReloc.RIPMove.GuestRIP;
         break;
-      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE): {
+      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE):
+      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE): {
         const uint64_t SiteOffset = SmallReloc.PatchableData.SiteOffset;
         const uint64_t ValueSize = SmallReloc.PatchableData.ValueSize;
         if (ValueSize == 0 || ValueSize > sizeof(uint64_t) || SmallReloc.PatchableData.SignExtend > 1 ||
@@ -1258,7 +1259,8 @@ namespace DiskCache {
         SmallRelocs[SmallIdx++] = SmallReloc;
         break;
       }
-      case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE: {
+      case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE:
+      case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE: {
         BlobSmallRelocation SmallReloc = {};
         SmallReloc.Offset = LocalOffset;
         SmallReloc.Type = uint8_t(Reloc.Header.Type);
