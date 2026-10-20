@@ -580,7 +580,7 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
           Resource->ProgramHeaders = std::move(ELFResult.ProgramHeaders);
           Resource->MappedFile->Relocations = std::move(ELFResult.Relocations);
           Resource->RequiresDelayedCacheLoad = ELFResult.HasCodeRelocations;
-          if (EnableDiskCache && !ELFResult.BuildID.empty())
+          if (EnableDiskCache && !ELFResult.BuildID.empty()) {
             Resource->MappedFile->FileId ^= XXH3_64bits(ELFResult.BuildID.data(), ELFResult.BuildID.size());
           }
 
@@ -599,7 +599,7 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
                                                                               "file");
         } else if (CheckForDiskCacheFile) {
           auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length}, false);
-          if (!ELFResult.BuildID.empty()) {
+          if (EnableDiskCache && !ELFResult.BuildID.empty()) {
             Resource->MappedFile->FileId ^= XXH3_64bits(ELFResult.BuildID.data(), ELFResult.BuildID.size());
           }
         }
