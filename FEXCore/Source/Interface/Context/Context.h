@@ -235,8 +235,8 @@ public:
   }
 
   void MarkMonoBackpatcherBlock(uint64_t BlockEntry) override;
-  std::atomic<uint64_t>& GetMonoBackPatcherBlock() {
-    return MonoBackpatcherBlock;
+  uint64_t GetMonoBackPatcherBlock() const {
+    return MonoBackpatcherBlock.load(std::memory_order_relaxed);
   }
 
 public:
