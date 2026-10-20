@@ -13,6 +13,7 @@ $end_info$
 #include "Common/FileMappingBaseAddress.h"
 
 #include <filesystem>
+#include <cstring>
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/personality.h>
@@ -209,6 +210,22 @@ struct ReadELFHeadersResult {
   fextl::vector<uint8_t> BuildID;
   bool HasCodeRelocations;
 };
+
+static void IncorporateBuildIDIntoFileId(uint64_t& FileId, std::span<const uint8_t> BuildID) {
+  if (BuildID.empty()) {
+    return;
+  }
+
+  // Match upstream cache identity semantics: an 8-byte build-id is used directly;
+  // other lengths are hashed so arbitrary GNU build-id lengths remain supported.
+  if (BuildID.size() == sizeof(uint64_t)) {
+    uint64_t BuildID64 {};
+    std::memcpy(&BuildID64, BuildID.data(), sizeof(BuildID64));
+    FileId ^= BuildID64;
+  } else {
+    FileId ^= XXH3_64bits(BuildID.data(), BuildID.size());
+  }
+}
 
 static ReadELFHeadersResult ReadELFHeaders(int FD, std::span<std::byte> HeaderData = {}, bool ParseRelocations = true, bool ParseBuildID = true) {
   std::string_view ELFMagic = ELFMAG;
@@ -580,8 +597,8 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
           Resource->ProgramHeaders = std::move(ELFResult.ProgramHeaders);
           Resource->MappedFile->Relocations = std::move(ELFResult.Relocations);
           Resource->RequiresDelayedCacheLoad = ELFResult.HasCodeRelocations;
-          if (EnableDiskCache && !ELFResult.BuildID.empty()) {
-            Resource->MappedFile->FileId ^= XXH3_64bits(ELFResult.BuildID.data(), ELFResult.BuildID.size());
+          if (EnableDiskCache) {
+            IncorporateBuildIDIntoFileId(Resource->MappedFile->FileId, ELFResult.BuildID);
           }
 
           // GuestRelocationType::Skip indicates to FEXOfflineCompiler that
@@ -599,8 +616,8 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
                                                                               "file");
         } else if (CheckForDiskCacheFile) {
           auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length}, false, true);
-          if (EnableDiskCache && !ELFResult.BuildID.empty()) {
-            Resource->MappedFile->FileId ^= XXH3_64bits(ELFResult.BuildID.data(), ELFResult.BuildID.size());
+          if (EnableDiskCache) {
+            IncorporateBuildIDIntoFileId(Resource->MappedFile->FileId, ELFResult.BuildID);
           }
         }
       } else if (ResourceIt->second.ProgramHeaders.empty()) {
