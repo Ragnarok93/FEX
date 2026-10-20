@@ -637,6 +637,8 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
   CPU::Arm64Emitter Emitter(&CTX, Code.data(), Code.size_bytes());
   for (size_t j = 0; j < EntryRelocations.size(); ++j) {
     const FEXCore::CPU::Relocation& Reloc = EntryRelocations[j];
+    std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] relocation index=%zu type=%u hostoff=%llu\\n",
+                 j, unsigned(Reloc.Header.Type), static_cast<unsigned long long>(Reloc.Header.Offset));
     Emitter.SetCursorOffset(Reloc.Header.Offset);
 
     switch (Reloc.Header.Type) {
@@ -675,6 +677,11 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
           return false;
         }
         std::memcpy(&Value, reinterpret_cast<const void*>(Reloc.GuestPatchableData.SiteAddress), Reloc.GuestPatchableData.ValueSize);
+        std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] data-move hostoff=%llu site=%llx size=%u raw=%016llx reg=%u signext=%u\\n",
+                     static_cast<unsigned long long>(Reloc.Header.Offset),
+                     static_cast<unsigned long long>(Reloc.GuestPatchableData.SiteAddress),
+                     unsigned(Reloc.GuestPatchableData.ValueSize), static_cast<unsigned long long>(Value),
+                     unsigned(Reloc.GuestPatchableData.RegisterIndex), unsigned(Reloc.GuestPatchableData.SignExtend));
         if (Reloc.GuestPatchableData.SignExtend && Reloc.GuestPatchableData.ValueSize < sizeof(Value)) {
           const unsigned BitCount = Reloc.GuestPatchableData.ValueSize * 8;
           const uint64_t SignBit = uint64_t {1} << (BitCount - 1);
