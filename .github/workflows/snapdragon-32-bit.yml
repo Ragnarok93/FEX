@@ -78,7 +78,7 @@ jobs:
       - name: Run targeted correctness regression tests
         run: |
           ctest --test-dir build --output-on-failure --timeout 302 \
-            -R '(crc32_8b|a32_lods|a32_rep_lods|vcvtps2ph_zeroing|SHLD_CF|2_C0_07_3|2_C0_07_4|2_C1_07_2|2_D0_07_2)\.asm
+            -R '(crc32_8b|a32_lods|a32_rep_lods|vcvtps2ph_zeroing|SHLD_CF|2_C0_07_3|2_C0_07_4|2_C1_07_2|2_D0_07_2)\.asm$'
 
       - name: Record build metadata
         if: always()
