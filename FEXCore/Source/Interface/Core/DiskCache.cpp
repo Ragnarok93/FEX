@@ -502,6 +502,17 @@ namespace DiskCache {
     }
   }
 
+  // Include the backing file identity in the key. A module-relative offset alone
+  // can collide when different executable files are mapped at the same address.
+  static uint64_t MakeFileBackedCodeKey(uint64_t GuestRIP, const ExecutableFileSectionInfo& Region) {
+    struct __attribute__((packed)) {
+      uint64_t GuestOffset;
+      uint64_t FileId;
+    } FileBackedKey = {GuestRIP - Region.FileStartVA, Region.FileInfo.FileId};
+
+    return XXH3_64bits(&FileBackedKey, sizeof(FileBackedKey));
+  }
+
   uint64_t DiskCache::MakeBlobKey(const uint64_t ModuleOffset) {
     struct {
       uint64_t ModuleOffset;
@@ -515,9 +526,9 @@ namespace DiskCache {
     if (!IsReadingDiskCache()) {
       return std::nullopt;
     }
-    uint64_t ModuleOffset = GuestRIP - Region.FileStartVA;
+    uint64_t CodeKey = MakeFileBackedCodeKey(GuestRIP, Region);
 
-    uint64_t Hash = MakeBlobKey(ModuleOffset);
+    uint64_t Hash = MakeBlobKey(CodeKey);
 
     IndexEntry Entry;
     {
@@ -736,9 +747,9 @@ namespace DiskCache {
     Blob.resize(TotalSize);
     uint8_t* BlobData = Blob.data();
 
-    uint64_t ModuleOffset = GuestRIP - Region.FileStartVA;
+    uint64_t CodeKey = MakeFileBackedCodeKey(GuestRIP, Region);
 
-    uint64_t BlobKey = MakeBlobKey(ModuleOffset);
+    uint64_t BlobKey = MakeBlobKey(CodeKey);
     MesaFOZ::foz_payload_key Key = {};
     fextl::string BlobName = fextl::fmt::format("{:016x}", BlobKey);
     memcpy(Key.bytes, BlobName.data(), BlobName.size());
