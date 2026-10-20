@@ -6,6 +6,7 @@ on:
       - Snapdragon-32-Bit
       - work/sd865-disk-cache-backport
       - debug/sd865-cache-diagnostics
+      - debug/sd865-cache-fault
   workflow_dispatch:
 
 permissions:
