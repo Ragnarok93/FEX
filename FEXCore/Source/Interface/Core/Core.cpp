@@ -9,6 +9,7 @@ $end_info$
 */
 
 #include <cstdint>
+#include <cstdio>
 #ifdef ZYDIS_DISASSEMBLER
 #include <Zydis/Zydis.h>
 #endif
@@ -848,10 +849,16 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   {
     Hit = DiskCache.Lookup(Thread, Region, GuestRIP);
     if (Hit) {
+      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] hit rip=%llx host=%zu entrypoints=%zu relocs=%zu pages=%zu\\n",
+                   static_cast<unsigned long long>(GuestRIP), Hit->HostCode.size(), Hit->EntryPoints.size(),
+                   Hit->Relocations.size(), Hit->GuestPages.size());
       DiskCacheHitRelocationsApplied = CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(Hit->HostCode), Hit->Relocations, false);
+      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] relocations-applied=%d\\n", int(DiskCacheHitRelocationsApplied));
 
       if (DiskCacheHitRelocationsApplied && LoadDiskCacheCode) {
         auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
+        std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] loaded=%d size=%zu entries=%zu\\n",
+                     int(LoadedCode.BlockBegin != nullptr), LoadedCode.Size, LoadedCode.EntryPoints.size());
         if (LoadedCode.BlockBegin) {
 
           // File-backed entries are relative to the image base; anonymous entries
