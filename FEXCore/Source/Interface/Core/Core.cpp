@@ -882,7 +882,21 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
           }
 
           const uint64_t EntryPointOffset = GuestRIP - EntryPointBase;
-          return reinterpret_cast<uintptr_t>(LoadedCode.EntryPoints[EntryPointOffset]);
+          auto EntryPoint = LoadedCode.EntryPoints.find(EntryPointOffset);
+          if (EntryPoint == LoadedCode.EntryPoints.end() || EntryPoint->second == nullptr) {
+            // A malformed or incompatible cache entry must fall back to normal
+            // compilation instead of returning a null/invalid host entrypoint.
+            break;
+          }
+
+          // Match the upstream cache-hit lifetime handling: the decoder and
+          // dispatcher may still hold views into guest code buffers used while
+          // resolving this block. Release/validate those views before entering
+          // cached machine code.
+          Thread->FrontendDecoder->DelayedDisownBuffer();
+          Thread->FrontendDecoder->ValidateDisownedOrFree();
+          Thread->OpDispatcher->ValidateDisownedOrFree();
+          return reinterpret_cast<uintptr_t>(EntryPoint->second);
         }
       }
     }
