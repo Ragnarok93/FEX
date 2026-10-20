@@ -106,7 +106,10 @@ namespace DiskCache {
 
   struct CodeHitData {
     fextl::vector<uint8_t> Blob;
-    // Non-owning spans may point into either Blob or this shared cached allocation.
+    // Relocations mutate host code, so it must have per-lookup storage and never
+    // alias the shared serialized-blob LRU.
+    fextl::vector<uint8_t> HostCodeCopy;
+    // Non-owning spans for metadata point into Blob or CachedBlob.
     fextl::shared_ptr<fextl::vector<uint8_t>> CachedBlob;
     std::span<uint8_t> HostCode;
     std::span<const BlobEntryPoint> EntryPoints;

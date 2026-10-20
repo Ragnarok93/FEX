@@ -915,13 +915,18 @@ namespace DiskCache {
     // Validate the serialized lengths using 64-bit arithmetic. The cache is persistent
     // input, so a corrupt header must not wrap SizeNeeded and produce out-of-bounds spans.
     const uint64_t SizeNeeded = GetBlobSizeNeeded(Header);
-    if (SizeNeeded > Entry.Size) {
+    if (SizeNeeded > Entry.Size || Header.GuestExtentsCount != Entry.GuestExtents.size()) {
       return std::nullopt;
     }
 
     const size_t GuestExtentsBytes = static_cast<size_t>(Header.GuestExtentsCount) * sizeof(uint32_t);
+    if (std::memcmp(BlobData + sizeof(Header), Entry.GuestExtents.data(), GuestExtentsBytes) != 0) {
+      return std::nullopt;
+    }
     const size_t HostCodeOffset = sizeof(Header) + GuestExtentsBytes;
     HitData.HostCode = {BlobData + HostCodeOffset, Header.HostSize};
+    HitData.HostCodeCopy.assign(HitData.HostCode.begin(), HitData.HostCode.end());
+    HitData.HostCode = {HitData.HostCodeCopy.data(), HitData.HostCodeCopy.size()};
     HitData.EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(BlobData + HostCodeOffset + Header.HostSize),
                            Header.EntryPointCount};
 
@@ -947,16 +952,20 @@ namespace DiskCache {
         break;
       case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE):
       case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE): {
+        const bool IsCRCRelocation = SmallReloc.Type == uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE);
         const uint64_t SiteOffset = SmallReloc.PatchableData.SiteOffset;
         const uint64_t ValueSize = SmallReloc.PatchableData.ValueSize;
-        if (ValueSize == 0 || ValueSize > sizeof(uint64_t) || SmallReloc.PatchableData.SignExtend > 1 ||
+        const uint64_t MaxPatchSize = IsCRCRelocation ? 16 : sizeof(uint64_t);
+        if (ValueSize == 0 || ValueSize > MaxPatchSize ||
+            (!IsCRCRelocation && SmallReloc.PatchableData.SignExtend > 1) ||
+            (IsCRCRelocation && SmallReloc.PatchableData.SignExtend != 0) ||
             SiteOffset > Header.GuestSize || ValueSize > Header.GuestSize - SiteOffset ||
             SiteOffset > std::numeric_limits<uint64_t>::max() - GuestRIP) {
           return std::nullopt;
         }
         Reloc.GuestPatchableData.RegisterIndex = SmallReloc.PatchableData.RegisterIndex;
         Reloc.GuestPatchableData.ValueSize = static_cast<uint8_t>(ValueSize);
-        Reloc.GuestPatchableData.SignExtend = SmallReloc.PatchableData.SignExtend != 0;
+        Reloc.GuestPatchableData.SignExtend = !IsCRCRelocation && SmallReloc.PatchableData.SignExtend != 0;
         Reloc.GuestPatchableData.SiteAddress = GuestRIP + SiteOffset;
         break;
       }
@@ -988,7 +997,6 @@ namespace DiskCache {
       if (CachedBlob) {
         HitData.CachedBlob = std::move(CachedBlob);
         uint8_t* CachedData = HitData.CachedBlob->data();
-        HitData.HostCode = {CachedData + HostCodeOffset, Header.HostSize};
         HitData.EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(CachedData + HostCodeOffset + Header.HostSize),
                                Header.EntryPointCount};
       }
@@ -1100,6 +1108,27 @@ namespace DiskCache {
     }
     const uint32_t EntryPointCount = static_cast<uint32_t>(CompiledCode.EntryPoints.size());
     const uint32_t TouchedGuestPagesCount = DecodedBlockInfo ? static_cast<uint32_t>(DecodedBlockInfo->CodePages.size()) : 0;
+
+    // Validate every serialized patch site against the guest-code payload. CRC sites
+    // span an instruction (up to 16 bytes); data relocations patch an immediate of at most 8.
+    for (const auto& Reloc : Relocations) {
+      if (!IsRelocationInBlock(Reloc, CompiledCode)) {
+        continue;
+      }
+      const bool IsDataReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE;
+      const bool IsCRCReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE;
+      if (!IsDataReloc && !IsCRCReloc) {
+        continue;
+      }
+      const uint64_t SiteAddress = Reloc.GuestPatchableData.SiteAddress;
+      const uint64_t SiteSize = Reloc.GuestPatchableData.ValueSize;
+      if (SiteAddress < GuestRIP || SiteSize == 0 ||
+          SiteSize > (IsCRCReloc ? 16 : sizeof(uint64_t)) ||
+          SiteAddress - GuestRIP > GuestCode.size() ||
+          SiteSize > GuestCode.size() - (SiteAddress - GuestRIP)) {
+        return false;
+      }
+    }
 
     // Only omit fields that have an emitted patchable-data relocation. Anything
     // that the backend does not know how to patch remains byte-exact in the hash.
