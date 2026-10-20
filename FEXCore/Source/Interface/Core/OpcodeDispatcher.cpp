@@ -4238,7 +4238,10 @@ AddressMode OpDispatchBuilder::DecodeAddress(const X86Tables::DecodedOp& Op, con
   A.AddrSize = (Op->Flags & X86Tables::DecodeFlags::FLAG_ADDRESS_SIZE) != 0 ? (GPRSize >> 1) : GPRSize;
   A.NonTSO = AccessType == MemoryAccessType::NONTSO || AccessType == MemoryAccessType::STREAM;
 
-  if (Operand.IsLiteral()) {
+  if (Operand.IsLiteralPatchable()) {
+    A.Base = _PatchableGuestData(OpSize::i64Bit, Operand.Literal(), Op->PC + Operand.Data.LiteralPatchable.FieldOffset,
+                                 Operand.Data.LiteralPatchable.Width);
+  } else if (Operand.IsLiteral()) {
     A.Offset = Operand.Literal();
 
     if (Operand.Data.Literal.Size != 8 && IsLoad) {

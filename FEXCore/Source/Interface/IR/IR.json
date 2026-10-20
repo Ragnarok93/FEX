@@ -932,6 +932,13 @@
       }
     },
     "ALU": {
+      "GPR = PatchableGuestData OpSize:#Size, i64:$Value, i64:$SiteAddress, i64:$SiteSize": {
+        "Desc": ["Loads a value in a patchable way",
+                 "Disk-cache load replaces the value with the live guest bytes at SiteAddress"
+                ],
+        "DestSize": "Size"
+      },
+
       "GPR = EntrypointOffset OpSize:#Size, i64:$Offset": {
         "Desc": ["Returns the <entrypoint> + Offset address",
                  "When the size is 4 bytes then 32-bit overflow and underflow needs to work"

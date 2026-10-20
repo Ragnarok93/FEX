@@ -642,6 +642,15 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
       Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIP.RegisterIndex), Pointer, CPU::Arm64Emitter::PadType::DOPAD);
       break;
     }
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE: {
+      uint64_t Value = 0;
+      if (!ForStorage) {
+        std::memcpy(&Value, reinterpret_cast<const void*>(Reloc.GuestPatchableData.SiteAddress), Reloc.GuestPatchableData.ValueSize);
+      }
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestPatchableData.RegisterIndex), Value,
+                           CPU::Arm64Emitter::PadType::DOPAD);
+      break;
+    }
 
     default: ERROR_AND_DIE_FMT("Unknown relocation type {}", ToUnderlying(Reloc.Header.Type));
     }

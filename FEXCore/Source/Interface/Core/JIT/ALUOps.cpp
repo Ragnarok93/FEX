@@ -54,6 +54,11 @@ DEF_OP(Constant) {
   LoadConstant(ARMEmitter::Size::i64Bit, Dst, Op->Constant, PadType, Op->MaxBytes);
 }
 
+DEF_OP(PatchableGuestData) {
+  auto Op = IROp->C<IR::IROp_PatchableGuestData>();
+  InsertGuestPatchableDataMove(GetReg(Node), Op->Value, Op->SiteAddress, static_cast<uint8_t>(Op->SiteSize));
+}
+
 DEF_OP(EntrypointOffset) {
   auto Op = IROp->C<IR::IROp_EntrypointOffset>();
 
