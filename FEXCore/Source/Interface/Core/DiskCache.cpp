@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+#define XXH_STATIC_LINKING_ONLY
+
 #include "FEXCore/Config/Config.h"
 #include "FEXCore/fextl/string.h"
 #include "FEXHeaderUtils/Filesystem.h"
