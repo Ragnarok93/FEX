@@ -28,9 +28,15 @@ hlt
 
 align 16
 .data:
+; Each source is stored in a 32-byte slot because the test loads the second
+; source from .data + 32. Keep a full 16-byte value in each XMM input.
 ; First string: ABCDabcdIJKLijkl
 dq 0x6463626144434241
 dq 0x6c6b6a694c4b4a49
+dq 0xffffffffffffffff
+dq 0xeeeeeeeeeeeeeeee
 ; Second string: Here I Am, Y'aLl
 dq 0x4120492065726548
 dq 0x6c4c612759202C6D
+dq 0xdddddddddddddddd
+dq 0xcccccccccccccccc
