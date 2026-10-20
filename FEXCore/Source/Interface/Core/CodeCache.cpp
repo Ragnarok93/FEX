@@ -701,12 +701,6 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
       }
       const uint64_t Target = GetLiveGuestRelativeBranchTarget(
         Reloc.GuestPatchableData.SiteAddress, Reloc.GuestPatchableData.ValueSize, CTX.Config.Is64BitMode);
-      const auto* Site = reinterpret_cast<const uint8_t*>(Reloc.GuestPatchableData.SiteAddress);
-      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] RIP-literal hostoff=%llu site=%llx size=%u bytes=%02x %02x %02x %02x %02x target=%llx mode64=%d\\n",
-                   static_cast<unsigned long long>(Reloc.Header.Offset),
-                   static_cast<unsigned long long>(Reloc.GuestPatchableData.SiteAddress),
-                   unsigned(Reloc.GuestPatchableData.ValueSize), Site[0], Site[1], Site[2], Site[3], Site[4],
-                   static_cast<unsigned long long>(Target), int(CTX.Config.Is64BitMode));
       Emitter.dc64(Target);
       break;
     }
