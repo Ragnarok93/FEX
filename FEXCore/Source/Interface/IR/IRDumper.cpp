@@ -172,6 +172,8 @@ static void PrintArg(fextl::stringstream* out, const IRListView*, NamedVectorCon
         return "u16_incremental_index";
       case NamedVectorConstant::NAMED_VECTOR_INCREMENTAL_U16_INDEX_UPPER:
         return "u16_incremental_index_upper";
+      case NamedVectorConstant::NAMED_VECTOR_INCREMENTAL_U8_INDEX:
+        return "u8_incremental_index";
       case NamedVectorConstant::NAMED_VECTOR_PADDSUBPS_INVERT:
         return "addsubps_invert";
       case NamedVectorConstant::NAMED_VECTOR_PADDSUBPS_INVERT_UPPER:
