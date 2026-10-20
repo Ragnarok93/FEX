@@ -849,9 +849,17 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   {
     Hit = DiskCache.Lookup(Thread, Region, GuestRIP);
     if (Hit) {
-      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] hit rip=%llx host=%zu entrypoints=%zu relocs=%zu pages=%zu\\n",
+      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] hit rip=%llx host=%zu entrypoints=%zu relocs=%zu pages=%zu\n",
                    static_cast<unsigned long long>(GuestRIP), Hit->HostCode.size(), Hit->EntryPoints.size(),
                    Hit->Relocations.size(), Hit->GuestPages.size());
+      // Dump the guest bytes for the cache-hit block so serialized relocation
+      // site offsets can be checked against the actual instruction stream.
+      const auto* GuestBytes = reinterpret_cast<const uint8_t*>(GuestRIP);
+      std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] guest-bytes rip=%llx:", static_cast<unsigned long long>(GuestRIP));
+      for (size_t i = 0; i < 64; ++i) {
+        std::fprintf(stderr, " %02x", GuestBytes[i]);
+      }
+      std::fprintf(stderr, "\n");
       DiskCacheHitRelocationsApplied = CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(Hit->HostCode), Hit->Relocations, false);
       std::fprintf(stderr, "[FEX-DISK-CACHE-DEBUG] relocations-applied=%d\\n", int(DiskCacheHitRelocationsApplied));
 
