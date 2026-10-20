@@ -467,7 +467,7 @@ namespace DiskCache {
         continue;
       }
 
-      const fextl::string Name = It->path().filename().string();
+      const std::string Name = It->path().filename().string();
       if (!IsMachineBucketDirectoryName(Name) || Name == ActiveMachineBucket) {
         continue;
       }
