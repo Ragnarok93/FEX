@@ -28,8 +28,48 @@ pcmpestri xmm2, xmm3, 0
 pcmpistri xmm2, xmm3, 0
 
 ; Force a near rel32 branch to exercise cache-time target patching.
-jmp near .after_branch
-times 160 db 0x90
+jmp .after_branch
+; Keep the branch target far enough away to exercise rel32 patching.
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
+dd 0x90909090
 .after_branch:
 hlt
 
