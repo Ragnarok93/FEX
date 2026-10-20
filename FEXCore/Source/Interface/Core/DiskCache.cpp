@@ -544,7 +544,7 @@ namespace DiskCache {
     uint64_t CodeKey = MakeFileBackedCodeKey(GuestRIP, Region);
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
     uint64_t Hash =
-      MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock().load(std::memory_order_relaxed));
+      MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock());
 
     IndexEntry Entry;
     {
@@ -765,7 +765,7 @@ namespace DiskCache {
     uint64_t CodeKey = MakeFileBackedCodeKey(GuestRIP, Region);
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
     uint64_t BlobKey =
-      MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock().load(std::memory_order_relaxed));
+      MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock());
     MesaFOZ::foz_payload_key Key = {};
     fextl::string BlobName = fextl::fmt::format("{:016x}", BlobKey);
     memcpy(Key.bytes, BlobName.data(), BlobName.size());
