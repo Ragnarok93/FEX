@@ -5,6 +5,7 @@ on:
     branches:
       - Snapdragon-32-Bit
       - work/sd865-disk-cache-backport
+      - debug/sd865-cache-diagnostics
   workflow_dispatch:
 
 permissions:
