@@ -16,6 +16,7 @@
 #include <limits>
 #include <algorithm>
 #include <charconv>
+#include <atomic>
 
 namespace FEXCore {
 
@@ -513,11 +514,25 @@ namespace DiskCache {
     return XXH3_64bits(&FileBackedKey, sizeof(FileBackedKey));
   }
 
-  uint64_t DiskCache::MakeBlobKey(const uint64_t ModuleOffset) {
-    struct {
-      uint64_t ModuleOffset;
+  uint64_t DiskCache::MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t CodeKey, bool Writable, bool MonoBackpatcher) {
+    struct __attribute__((packed)) {
+      uint64_t CodeKey;
       XXH128_hash_t BucketHash;
-    } BlobKeyBytes = {ModuleOffset, BucketHash};
+      uint8_t Flags;
+    } BlobKeyBytes = {CodeKey, BucketHash, 0};
+
+    if (Writable) {
+      BlobKeyBytes.Flags |= 1 << 0;
+    }
+    if (CTX->AreMonoHacksActive()) {
+      BlobKeyBytes.Flags |= 1 << 1;
+    }
+    if (Thread->CurrentFrame->State.flags[X86State::RFLAG_TF_RAW_LOC]) {
+      BlobKeyBytes.Flags |= 1 << 2;
+    }
+    if (MonoBackpatcher) {
+      BlobKeyBytes.Flags |= 1 << 3;
+    }
 
     return XXH3_64bits(&BlobKeyBytes, sizeof(BlobKeyBytes));
   }
@@ -527,8 +542,9 @@ namespace DiskCache {
       return std::nullopt;
     }
     uint64_t CodeKey = MakeFileBackedCodeKey(GuestRIP, Region);
-
-    uint64_t Hash = MakeBlobKey(CodeKey);
+    auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
+    uint64_t Hash =
+      MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock().load(std::memory_order_relaxed));
 
     IndexEntry Entry;
     {
@@ -555,7 +571,6 @@ namespace DiskCache {
     memcpy(&Header, HitData.Blob.data(), sizeof(Header));
 
     // do we have enough room in our live code to even hash GuestSize worth?
-    auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
     if (RangeInfo.Size == 0 || RangeInfo.Base > GuestRIP) {
       return std::nullopt;
     }
@@ -748,8 +763,9 @@ namespace DiskCache {
     uint8_t* BlobData = Blob.data();
 
     uint64_t CodeKey = MakeFileBackedCodeKey(GuestRIP, Region);
-
-    uint64_t BlobKey = MakeBlobKey(CodeKey);
+    auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
+    uint64_t BlobKey =
+      MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock().load(std::memory_order_relaxed));
     MesaFOZ::foz_payload_key Key = {};
     fextl::string BlobName = fextl::fmt::format("{:016x}", BlobKey);
     memcpy(Key.bytes, BlobName.data(), BlobName.size());
