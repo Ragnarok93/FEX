@@ -992,7 +992,16 @@ namespace DiskCache {
       reinterpret_cast<const int64_t*>(reinterpret_cast<const uint8_t*>(ThunkRelocs) + Header.ThunkRelocCount * sizeof(BlobThunkRelocation));
     HitData.GuestPages.reserve(Header.TouchedGuestPagesCount);
     for (uint32_t i = 0; i < Header.TouchedGuestPagesCount; ++i) {
-      HitData.GuestPages.push_back(GuestRIP + PageOffsets[i]);
+      // Guest-page offsets come from persistent cache data. Reconstruct them using
+      // guest address width, then reject malformed entries that aren't page aligned.
+      uint64_t GuestPage = GuestRIP + static_cast<uint64_t>(PageOffsets[i]);
+      if (!CTX->Config.Is64BitMode) {
+        GuestPage = static_cast<uint32_t>(GuestPage);
+      }
+      if ((GuestPage & (FEXCore::Utils::FEX_PAGE_SIZE - 1)) != 0) {
+        return std::nullopt;
+      }
+      HitData.GuestPages.push_back(GuestPage);
     }
 
     if (!HitData.CachedBlob) {
