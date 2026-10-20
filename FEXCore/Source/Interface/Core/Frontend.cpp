@@ -1392,6 +1392,16 @@ void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
     }
   }
 
+  // Relative branches have one displacement field at the end of the instruction.
+  // Only patch rel32 in 64-bit guest mode; 32-bit guest branch target wrapping uses
+  // different address semantics and stays byte-exact.
+  if (BlockInfo.Is64BitMode && DecodeInst->TableInfo &&
+      (DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_SETS_RIP) &&
+      DecodeInst->Src[0].IsLiteral()) {
+    LiteralToPatch = &DecodeInst->Src[0];
+    Type = DataMaskType::BRANCH;
+  }
+
   // Displacements can be patched only when their field is the last field read by
   // the decoder. Instructions with a separate immediate are left byte-exact until
   // the decoder tracks multiple fields per instruction.
@@ -1449,12 +1459,41 @@ void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
     return;
   }
   Block.DataMasks.push_back({OpAddress + LastFieldReadOffset, Type, LastFieldReadSize});
-  if (LiteralToPatch && Type == DataMaskType::MOV) {
+  if (LiteralToPatch && (Type == DataMaskType::MOV || Type == DataMaskType::BRANCH)) {
     LiteralToPatch->Type = FEXCore::X86Tables::DecodedOperand::OpType::LiteralPatchable;
     LiteralToPatch->Data.LiteralPatchable.FieldOffset = LastFieldReadOffset;
     LiteralToPatch->Data.LiteralPatchable.Width = LastFieldReadSize;
     LiteralToPatch->Data.LiteralPatchable.SignExtend =
       DecodeInst->TableInfo && (DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_SRC_SEXT);
+  }
+}
+
+void Decoder::PruneInlinedBranchDataMasks() {
+  for (auto& Block : BlockInfo.Blocks) {
+    if (Block.DataMasks.empty() || Block.NumInstructions == 0) {
+      continue;
+    }
+    const auto& LastInst = Block.DecodedInstructions[Block.NumInstructions - 1];
+    const auto& LastMask = Block.DataMasks.back();
+    if (LastMask.Type != DataMaskType::BRANCH || !LastInst.Src[0].IsLiteralPatchable()) {
+      continue;
+    }
+
+    const uint64_t NextInst = LastInst.PC + LastInst.InstSize;
+    if (LastMask.FieldAddress < LastInst.PC || LastMask.FieldAddress > NextInst ||
+        LastMask.ValueSize > NextInst - LastMask.FieldAddress) {
+      continue;
+    }
+
+    // The detector only marks rel32 branches for cache patching.
+    const uint64_t Target = NextInst + static_cast<int32_t>(LastInst.Src[0].Literal());
+    auto TargetIt = std::lower_bound(BlockInfo.Blocks.begin(), BlockInfo.Blocks.end(), Target,
+                                     [](const auto& Candidate, uint64_t Address) { return Candidate.Entry < Address; });
+    if (TargetIt != BlockInfo.Blocks.end() && TargetIt->Entry == Target) {
+      // Branches that remain inside the decoded multiblock are resolved by the
+      // frontend itself, so their displacement bytes must stay part of the hash.
+      Block.DataMasks.pop_back();
+    }
   }
 }
 
@@ -1670,6 +1709,9 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
 
   for (auto& Block : BlockInfo.Blocks) {
     Block.IsEntryPoint = BlockInfo.EntryPoints.contains(Block.Entry);
+  }
+  if (WantsDataMasks) {
+    PruneInlinedBranchDataMasks();
   }
 }
 

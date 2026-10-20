@@ -109,6 +109,7 @@ private:
 
   void AddBranchTarget(uint64_t Target);
   void DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block);
+  void PruneInlinedBranchDataMasks();
 
   bool CheckRangeExecutable(uint64_t Address, uint64_t Size);
 

@@ -33,6 +33,11 @@ enum class RelocationTypes : uint32_t {
   // Recompute a Full-SMC validation CRC from current guest instruction bytes on cache load.
   // Uses the RelocGuestPatchableData payload.
   RELOC_GUEST_PATCHABLE_CRC_MOVE,
+
+  // Relative guest branch target, stored as a literal and recomputed from live disp32.
+  RELOC_GUEST_PATCHABLE_RIP_LITERAL,
+  // Relative guest branch target, loaded into a register and recomputed from live disp32.
+  RELOC_GUEST_PATCHABLE_RIP_MOVE,
 };
 
 struct FEX_PACKED RelocationHeader final {

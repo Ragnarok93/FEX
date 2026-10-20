@@ -60,7 +60,11 @@ DEF_OP(ExitFunction) {
     if (NewRIP < EC_CODE_BITMAP_MAX_ADDRESS && RtlIsEcCode(NewRIP)) {
       str(REG_CALLRET_SP, STATE_PTR(CpuStateFrame, State.callret_sp));
       add(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::rsp, StaticRegisters[X86State::REG_RSP], 0);
-      InsertGuestRIPMove(EC_CALL_CHECKER_PC_REG, NewRIP);
+      if (Op->PatchSiteAddress) {
+        InsertGuestPatchableRIPMove(EC_CALL_CHECKER_PC_REG, NewRIP, Op->PatchSiteAddress, static_cast<uint8_t>(Op->PatchSiteSize));
+      } else {
+        InsertGuestRIPMove(EC_CALL_CHECKER_PC_REG, NewRIP);
+      }
       ldr(TMP2, STATE_PTR(CpuStateFrame, Pointers.ExitFunctionEC));
       br(TMP2);
     } else {
@@ -157,7 +161,7 @@ DEF_OP(ExitFunction) {
         (void)Bind(&TFUnset);
       }
 
-      EmitLinkedBranch(NewRIP, Op->Hint == IR::BranchHint::Call);
+      EmitLinkedBranch(NewRIP, Op->Hint == IR::BranchHint::Call, Op->PatchSiteAddress, static_cast<uint8_t>(Op->PatchSiteSize));
       (void)Bind(&l_CallReturn);
 #ifdef ARCHITECTURE_arm64ec
     }

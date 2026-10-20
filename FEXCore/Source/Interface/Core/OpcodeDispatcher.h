@@ -202,9 +202,10 @@ public:
     FlushRegisterCache();
     return _ExitFunction(GetOpSize(NewRIP), NewRIP, Hint, InvalidNode, InvalidNode);
   }
-  IRPair<IROp_ExitFunction> ExitFunction(Ref NewRIP, BranchHint Hint, Ref CallReturnAddress, Ref CallReturnBlock) {
+  IRPair<IROp_ExitFunction> ExitFunction(Ref NewRIP, BranchHint Hint, Ref CallReturnAddress, Ref CallReturnBlock,
+                                         uint64_t PatchSiteAddress = 0, uint64_t PatchSiteSize = 0) {
     FlushRegisterCache();
-    return _ExitFunction(GetOpSize(NewRIP), NewRIP, Hint, CallReturnAddress, CallReturnBlock);
+    return _ExitFunction(GetOpSize(NewRIP), NewRIP, Hint, CallReturnAddress, CallReturnBlock, PatchSiteAddress, PatchSiteSize);
   }
   IRPair<IROp_Break> Break(BreakDefinition Reason) {
     FlushRegisterCache();
@@ -1571,12 +1572,25 @@ private:
     return _GetRelocatedPC(Op, Offset, false);
   }
 
-  void ExitRelocatedPC(const FEXCore::X86Tables::DecodedOp& Op, int64_t Offset = 0) {
-    ExitFunction(_GetRelocatedPC(Op, Offset, true /* Inline */));
+  void ExitRelocatedPC(const FEXCore::X86Tables::DecodedOp& Op, int64_t Offset, BranchHint Hint, Ref CallReturnAddress, Ref CallReturnBlock) {
+    uint64_t PatchSiteAddress = 0;
+    uint64_t PatchSiteSize = 0;
+    if (Op->Src[0].IsLiteralPatchable()) {
+      const auto& Literal = Op->Src[0].Data.LiteralPatchable;
+      int64_t DecodedDisplacement = static_cast<int64_t>(Op->Src[0].Literal());
+      if (Literal.SignExtend && Literal.Width == 4) {
+        DecodedDisplacement = static_cast<int32_t>(Op->Src[0].Literal());
+      }
+      if (Offset == DecodedDisplacement && Literal.Width == 4) {
+        PatchSiteAddress = Op->PC + Literal.FieldOffset;
+        PatchSiteSize = Literal.Width;
+      }
+    }
+    ExitFunction(_GetRelocatedPC(Op, Offset, true /* Inline */), Hint, CallReturnAddress, CallReturnBlock, PatchSiteAddress, PatchSiteSize);
   }
 
-  void ExitRelocatedPC(const FEXCore::X86Tables::DecodedOp& Op, int64_t Offset, BranchHint Hint, Ref CallReturnAddress, Ref CallReturnBlock) {
-    ExitFunction(_GetRelocatedPC(Op, Offset, true /* Inline */), Hint, CallReturnAddress, CallReturnBlock);
+  void ExitRelocatedPC(const FEXCore::X86Tables::DecodedOp& Op, int64_t Offset = 0) {
+    ExitRelocatedPC(Op, Offset, BranchHint::None, InvalidNode, InvalidNode);
   }
 
   [[nodiscard]]

@@ -607,6 +607,25 @@ void CodeCache::Validate(const ExecutableFileSectionInfo& Section, fextl::set<ui
   LogMan::Msg::IFmt("\tSuccessfully validated cache");
 }
 
+static inline int64_t ReadLiveGuestDisplacement(uint64_t SiteAddress, uint8_t ValueSize) {
+  uint64_t Raw = 0;
+  if (ValueSize == 0 || ValueSize > sizeof(Raw)) {
+    return 0;
+  }
+  std::memcpy(&Raw, reinterpret_cast<const void*>(SiteAddress), ValueSize);
+  // These patch sites are currently limited to disp32 branches.
+  if (ValueSize == 4) {
+    return static_cast<int32_t>(Raw);
+  }
+  if (ValueSize == 2) {
+    return static_cast<int16_t>(Raw);
+  }
+  if (ValueSize == 1) {
+    return static_cast<int8_t>(Raw);
+  }
+  return static_cast<int64_t>(Raw);
+}
+
 bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> Code,
                                      std::span<const FEXCore::CPU::Relocation> EntryRelocations, bool ForStorage) {
   CPU::Arm64Emitter Emitter(&CTX, Code.data(), Code.size_bytes());
@@ -667,6 +686,25 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
       const uint64_t Value = ForStorage ? 0 :
         FEXCore::Utils::crc32(reinterpret_cast<const uint8_t*>(Reloc.GuestPatchableData.SiteAddress), Reloc.GuestPatchableData.ValueSize);
       Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestPatchableData.RegisterIndex), Value,
+                           CPU::Arm64Emitter::PadType::DOPAD);
+      break;
+    }
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL: {
+      if (Reloc.GuestPatchableData.ValueSize != 4) {
+        return false;
+      }
+      const uint64_t Target = Reloc.GuestPatchableData.SiteAddress + Reloc.GuestPatchableData.ValueSize +
+        ReadLiveGuestDisplacement(Reloc.GuestPatchableData.SiteAddress, Reloc.GuestPatchableData.ValueSize);
+      Emitter.dc64(Target);
+      break;
+    }
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE: {
+      if (Reloc.GuestPatchableData.ValueSize != 4) {
+        return false;
+      }
+      const uint64_t Target = Reloc.GuestPatchableData.SiteAddress + Reloc.GuestPatchableData.ValueSize +
+        ReadLiveGuestDisplacement(Reloc.GuestPatchableData.SiteAddress, Reloc.GuestPatchableData.ValueSize);
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestPatchableData.RegisterIndex), Target,
                            CPU::Arm64Emitter::PadType::DOPAD);
       break;
     }

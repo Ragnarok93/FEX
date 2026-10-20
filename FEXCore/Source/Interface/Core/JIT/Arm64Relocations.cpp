@@ -58,7 +58,8 @@ Arm64JITCore::NamedSymbolLiteralPair Arm64JITCore::InsertNamedSymbolLiteral(FEXC
 void Arm64JITCore::PlaceNamedSymbolLiteral(NamedSymbolLiteralPair Lit) {
   switch (Lit.MoveABI.Header.Type) {
   case RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL:
-  case RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
+  case RelocationTypes::RELOC_GUEST_RIP_LITERAL:
+  case RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL: {
     Lit.MoveABI.Header.Offset = GetCursorOffset();
     break;
   }
@@ -111,6 +112,31 @@ void Arm64JITCore::InsertGuestPatchableCRCMove(ARMEmitter::Register Reg, uint64_
 
   LoadConstant(ARMEmitter::Size::i64Bit, Reg, Value, FEXCore::CPU::Arm64Emitter::PadType::DOPAD);
   Relocations.emplace_back(MoveABI);
+}
+
+void Arm64JITCore::InsertGuestPatchableRIPMove(ARMEmitter::Register Reg, uint64_t Value, uint64_t SiteAddress, uint8_t ValueSize) {
+  Relocation MoveABI = Relocation::Default();
+  MoveABI.GuestPatchableData.Header = {.Offset = GetCursorOffset(),
+                                       .Type = FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE};
+  MoveABI.GuestPatchableData.RegisterIndex = Reg.Idx();
+  MoveABI.GuestPatchableData.ValueSize = ValueSize;
+  MoveABI.GuestPatchableData.SignExtend = false;
+  MoveABI.GuestPatchableData.SiteAddress = SiteAddress;
+
+  LoadConstant(ARMEmitter::Size::i64Bit, Reg, Value, FEXCore::CPU::Arm64Emitter::PadType::DOPAD);
+  Relocations.emplace_back(MoveABI);
+}
+
+auto Arm64JITCore::InsertGuestPatchableRIPLiteral(uint64_t GuestRIP, uint64_t SiteAddress, uint8_t ValueSize)
+  -> NamedSymbolLiteralPair {
+  Relocation MoveABI = Relocation::Default();
+  MoveABI.GuestPatchableData.Header = {.Offset = 0,
+                                       .Type = FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL};
+  MoveABI.GuestPatchableData.RegisterIndex = 0;
+  MoveABI.GuestPatchableData.ValueSize = ValueSize;
+  MoveABI.GuestPatchableData.SignExtend = false;
+  MoveABI.GuestPatchableData.SiteAddress = SiteAddress;
+  return {.Lit = GuestRIP, .MoveABI = MoveABI};
 }
 
 void Arm64JITCore::InsertGuestRIPMove(ARMEmitter::Register Reg, uint64_t Constant) {

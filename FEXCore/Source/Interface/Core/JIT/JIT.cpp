@@ -994,9 +994,14 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
 
     // This is a ExitFunctionLinkData struct
     BindOrRestart(&l_ExitLink);
-    dc64(0);                                                                   // HostCode
-    PlaceNamedSymbolLiteral(InsertGuestRIPLiteral(PendingJumpThunk.GuestRIP)); // GuestRIP
-    dc64(PendingJumpThunk.CallerAddress - ThunkAddress);                       // CallerOffset
+    dc64(0); // HostCode
+    if (PendingJumpThunk.PatchSiteAddress) {
+      PlaceNamedSymbolLiteral(InsertGuestPatchableRIPLiteral(PendingJumpThunk.GuestRIP, PendingJumpThunk.PatchSiteAddress,
+                                                             PendingJumpThunk.PatchSiteSize));
+    } else {
+      PlaceNamedSymbolLiteral(InsertGuestRIPLiteral(PendingJumpThunk.GuestRIP));
+    }
+    dc64(PendingJumpThunk.CallerAddress - ThunkAddress); // CallerOffset
   }
 
   BindOrRestart(&l_ExitLink);

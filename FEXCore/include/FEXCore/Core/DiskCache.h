@@ -213,7 +213,7 @@ namespace DiskCache {
     std::optional<uint64_t> MakeCodeKey(Core::InternalThreadState* Thread, const std::optional<ExecutableFileSectionInfo>& Region, uint64_t GuestRIP);
 
     FEXCore::Context::ContextImpl* CTX;
-    static const uint16_t FormatVersion = 4;
+    static const uint16_t FormatVersion = 5;
     XXH128_hash_t BucketHash;
     fextl::vector<fextl::unique_ptr<IndexedDB>> ROCacheDBs;
     fextl::unique_ptr<IndexedDB> RWCacheDB;

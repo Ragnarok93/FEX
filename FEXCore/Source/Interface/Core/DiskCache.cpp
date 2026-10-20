@@ -951,11 +951,16 @@ namespace DiskCache {
         Reloc.GuestRIP.GuestRIP = SmallReloc.RIPMove.GuestRIP;
         break;
       case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE):
-      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE): {
+      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE):
+      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL):
+      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE): {
         const bool IsCRCRelocation = SmallReloc.Type == uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE);
+        const bool IsRIPRelocation =
+          SmallReloc.Type == uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL) ||
+          SmallReloc.Type == uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE);
         const uint64_t SiteOffset = SmallReloc.PatchableData.SiteOffset;
         const uint64_t ValueSize = SmallReloc.PatchableData.ValueSize;
-        const uint64_t MaxPatchSize = IsCRCRelocation ? 16 : sizeof(uint64_t);
+        const uint64_t MaxPatchSize = IsCRCRelocation ? 16 : (IsRIPRelocation ? 4 : sizeof(uint64_t));
         if (ValueSize == 0 || ValueSize > MaxPatchSize ||
             (!IsCRCRelocation && SmallReloc.PatchableData.SignExtend > 1) ||
             (IsCRCRelocation && SmallReloc.PatchableData.SignExtend != 0) ||
@@ -1117,13 +1122,15 @@ namespace DiskCache {
       }
       const bool IsDataReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE;
       const bool IsCRCReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE;
-      if (!IsDataReloc && !IsCRCReloc) {
+      const bool IsRIPReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL ||
+                              Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE;
+      if (!IsDataReloc && !IsCRCReloc && !IsRIPReloc) {
         continue;
       }
       const uint64_t SiteAddress = Reloc.GuestPatchableData.SiteAddress;
       const uint64_t SiteSize = Reloc.GuestPatchableData.ValueSize;
-      if (SiteAddress < GuestRIP || SiteSize == 0 ||
-          SiteSize > (IsCRCReloc ? 16 : sizeof(uint64_t)) ||
+      const uint64_t MaxSiteSize = IsCRCReloc ? 16 : (IsRIPReloc ? 4 : sizeof(uint64_t));
+      if (SiteAddress < GuestRIP || SiteSize == 0 || SiteSize > MaxSiteSize ||
           SiteAddress - GuestRIP > GuestCode.size() ||
           SiteSize > GuestCode.size() - (SiteAddress - GuestRIP)) {
         return false;
@@ -1134,8 +1141,10 @@ namespace DiskCache {
     // that the backend does not know how to patch remains byte-exact in the hash.
     fextl::vector<std::pair<uint32_t, uint32_t>> PatchableFields;
     for (const auto& Reloc : Relocations) {
-      if (!IsRelocationInBlock(Reloc, CompiledCode) ||
-          Reloc.Header.Type != CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE) {
+      const bool IsDataReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE;
+      const bool IsRIPReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL ||
+                              Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE;
+      if (!IsRelocationInBlock(Reloc, CompiledCode) || (!IsDataReloc && !IsRIPReloc)) {
         continue;
       }
       const uint64_t SiteAddress = Reloc.GuestPatchableData.SiteAddress;
@@ -1291,7 +1300,9 @@ namespace DiskCache {
         break;
       }
       case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE:
-      case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE: {
+      case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE:
+      case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL:
+      case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE: {
         BlobSmallRelocation SmallReloc = {};
         SmallReloc.Offset = LocalOffset;
         SmallReloc.Type = uint8_t(Reloc.Header.Type);
