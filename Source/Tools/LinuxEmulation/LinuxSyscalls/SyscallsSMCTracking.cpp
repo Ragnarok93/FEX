@@ -210,7 +210,7 @@ struct ReadELFHeadersResult {
   bool HasCodeRelocations;
 };
 
-static ReadELFHeadersResult ReadELFHeaders(int FD, std::span<std::byte> HeaderData = {}) {
+static ReadELFHeadersResult ReadELFHeaders(int FD, std::span<std::byte> HeaderData = {}, bool ParseRelocations = true) {
   std::string_view ELFMagic = ELFMAG;
   if (HeaderData.data()) {
     if (HeaderData.size_bytes() < ELFMagic.size() || std::memcmp(ELFMagic.data(), HeaderData.data(), ELFMagic.size()) != 0) {
@@ -230,8 +230,12 @@ static ReadELFHeadersResult ReadELFHeaders(int FD, std::span<std::byte> HeaderDa
     return {};
   }
 
-  auto Relocations = Parser.PopulateRelocations();
-  auto HasCodeRelocations = Parser.HasCodeRelocations();
+  fextl::robin_map<uint32_t, FEXCore::GuestRelocationType> Relocations;
+  bool HasCodeRelocations = false;
+  if (ParseRelocations) {
+    Relocations = Parser.PopulateRelocations();
+    HasCodeRelocations = Parser.HasCodeRelocations();
+  }
   auto BuildID = Parser.GetBuildID();
   return ReadELFHeadersResult {std::move(Parser.phdrs), std::move(Relocations), std::move(BuildID), HasCodeRelocations};
 }
@@ -594,7 +598,7 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
           LOGMAN_THROW_A_FMT(Resource->ProgramHeaders.empty() || offset == 0, "Expected file offset 0 for the first mapping of an ELF "
                                                                               "file");
         } else if (CheckForDiskCacheFile) {
-          auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length});
+          auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length}, false);
           if (!ELFResult.BuildID.empty()) {
             Resource->MappedFile->FileId ^= XXH3_64bits(ELFResult.BuildID.data(), ELFResult.BuildID.size());
           }
