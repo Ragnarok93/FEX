@@ -96,6 +96,8 @@ namespace DiskCache {
 
   struct CodeHitData {
     fextl::vector<uint8_t> Blob;
+    // Non-owning spans may point into either Blob or this shared cached allocation.
+    fextl::shared_ptr<fextl::vector<uint8_t>> CachedBlob;
     std::span<uint8_t> HostCode;
     std::span<const BlobEntryPoint> EntryPoints;
     fextl::vector<FEXCore::CPU::Relocation> Relocations;
