@@ -210,7 +210,7 @@ struct ReadELFHeadersResult {
   bool HasCodeRelocations;
 };
 
-static ReadELFHeadersResult ReadELFHeaders(int FD, std::span<std::byte> HeaderData = {}, bool ParseRelocations = true) {
+static ReadELFHeadersResult ReadELFHeaders(int FD, std::span<std::byte> HeaderData = {}, bool ParseRelocations = true, bool ParseBuildID = true) {
   std::string_view ELFMagic = ELFMAG;
   if (HeaderData.data()) {
     if (HeaderData.size_bytes() < ELFMagic.size() || std::memcmp(ELFMagic.data(), HeaderData.data(), ELFMagic.size()) != 0) {
@@ -236,7 +236,7 @@ static ReadELFHeadersResult ReadELFHeaders(int FD, std::span<std::byte> HeaderDa
     Relocations = Parser.PopulateRelocations();
     HasCodeRelocations = Parser.HasCodeRelocations();
   }
-  auto BuildID = Parser.GetBuildID();
+  auto BuildID = ParseBuildID ? Parser.GetBuildID() : fextl::vector<uint8_t> {};
   return ReadELFHeadersResult {std::move(Parser.phdrs), std::move(Relocations), std::move(BuildID), HasCodeRelocations};
 }
 
@@ -576,7 +576,7 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
         CheckForElfFile = true;
 #endif
         if (CheckForElfFile) {
-          auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length});
+          auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length}, true, EnableDiskCache);
           Resource->ProgramHeaders = std::move(ELFResult.ProgramHeaders);
           Resource->MappedFile->Relocations = std::move(ELFResult.Relocations);
           Resource->RequiresDelayedCacheLoad = ELFResult.HasCodeRelocations;
@@ -598,7 +598,7 @@ SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t a
           LOGMAN_THROW_A_FMT(Resource->ProgramHeaders.empty() || offset == 0, "Expected file offset 0 for the first mapping of an ELF "
                                                                               "file");
         } else if (CheckForDiskCacheFile) {
-          auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length}, false);
+          auto ELFResult = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length}, false, true);
           if (EnableDiskCache && !ELFResult.BuildID.empty()) {
             Resource->MappedFile->FileId ^= XXH3_64bits(ELFResult.BuildID.data(), ELFResult.BuildID.size());
           }
