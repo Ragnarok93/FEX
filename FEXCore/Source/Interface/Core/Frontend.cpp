@@ -137,6 +137,8 @@ std::pair<uint64_t, bool> Decoder::ReadData(uint8_t Size) {
 
   uint64_t Res = 0;
   uint64_t Address = reinterpret_cast<uint64_t>(InstStream + InstructionSize);
+  LastFieldReadOffset = InstructionSize;
+  LastFieldReadSize = Size;
   if (CheckRangeExecutable(Address, Size)) {
     std::memcpy(&Res, &InstStream[InstructionSize], Size);
   } else {
@@ -1311,6 +1313,13 @@ void Decoder::AddBranchTarget(uint64_t Target) {
           .BlockStatus = BlockIt->BlockStatus,
         };
 
+        if (!BlockIt->DataMasks.empty()) {
+          auto MaskIt = std::lower_bound(BlockIt->DataMasks.begin(), BlockIt->DataMasks.end(), SplitAddr,
+                                         [](const DataMask& Mask, uint64_t Addr) { return Mask.FieldAddress < Addr; });
+          SplitBlock.DataMasks.assign(MaskIt, BlockIt->DataMasks.end());
+          BlockIt->DataMasks.erase(MaskIt, BlockIt->DataMasks.end());
+        }
+
         BlockIt->Size = SplitOffset;
         BlockIt->NumInstructions = SplitIdx;
 
@@ -1346,6 +1355,34 @@ const uint8_t* Decoder::AdjustAddrForSpecialRegion(const uint8_t* _InstStream, u
   }
 
   return _InstStream - EntryPoint + RIP;
+}
+
+void Decoder::DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block) {
+  if (!BlockInfo.Is64BitMode || LastFieldReadSize < 4 || !DecodeInst) {
+    return;
+  }
+
+  // MOV r32/r64, imm32/imm64 is common in JIT-generated code and its immediate
+  // can be safely reloaded from the live guest bytes on a cache hit.
+  if (DecodeInst->OPRaw < 0xB8 || DecodeInst->OPRaw > 0xBF) {
+    return;
+  }
+
+  FEXCore::X86Tables::DecodedOperand* LiteralToPatch = nullptr;
+  for (auto& Src : DecodeInst->Src) {
+    if (Src.IsLiteral()) {
+      LiteralToPatch = &Src;
+      break;
+    }
+  }
+  if (!LiteralToPatch || LiteralToPatch->Literal() == 0) {
+    return;
+  }
+
+  Block.DataMasks.push_back({OpAddress + LastFieldReadOffset, DataMaskType::MOV, LastFieldReadSize});
+  LiteralToPatch->Type = FEXCore::X86Tables::DecodedOperand::OpType::LiteralPatchable;
+  LiteralToPatch->Data.LiteralPatchable.FieldOffset = LastFieldReadOffset;
+  LiteralToPatch->Data.LiteralPatchable.Width = LastFieldReadSize;
 }
 
 bool Decoder::CheckIfCacheable(FEXCore::Core::InternalThreadState& Thread, const uint8_t* InstStream, uint64_t PC, uint64_t MaxInst) {
@@ -1406,6 +1443,8 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
 
   bool EntryBlock {true};
   bool FinalInstruction {false};
+  const bool WantsDataMasks = (CTX->DiskCache.IsReadingDiskCache() || CTX->DiskCache.IsWritingDiskCache()) &&
+                              CTX->Config.SMCChecks != FEXCore::Config::CONFIG_SMC_FULL;
 
   while (!FinalInstruction && !BlocksToDecode.empty()) {
     auto BlockDecodeIt = BlocksToDecode.begin();
@@ -1447,6 +1486,7 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
 
     while (1) {
       InstructionSize = 0;
+      LastFieldReadSize = 0;
 
       // MAX_INST_SIZE assumes worst case
       auto OpAddress = RIPToDecode + PCOffset;
@@ -1495,6 +1535,10 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
       ++BlockIt->NumInstructions;
       BlockIt->Size += DecodeInst->InstSize;
 
+      if (WantsDataMasks && BlockIt->BlockStatus == DecodedBlockStatus::SUCCESS && BlockInfo.Is64BitMode && !Relocations) {
+        DetectDataMasks(OpAddress, *BlockIt);
+      }
+
       // Can not continue this block at all on invalid instruction
       if (BlockIt->BlockStatus != DecodedBlockStatus::SUCCESS) [[unlikely]] {
         if (!EntryBlock && BlockIt->BlockStatus != DecodedBlockStatus::BAD_RELOCATION) {
@@ -1529,6 +1573,9 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
           // We don't want to short circuit this since we want to calculate our ranges still
           // NOTE: This will invalidate BlockIt, this is fine as we immediately break from the loop and EraseBlock cannot be true
           BlockIt->ForceFullSMCDetection = CTX->AreMonoHacksActive() && IsBranchMonoTailcall(BlockIt->NumInstructions);
+          if (BlockIt->ForceFullSMCDetection) {
+            BlockIt->DataMasks.clear();
+          }
           BranchTargetInMultiblockRange();
         }
 

@@ -34,6 +34,14 @@ public:
     BAD_RELOCATION,
   };
 
+  enum class DataMaskType : uint8_t { NONE, MOV, BRANCH, DISP, NOP };
+
+  struct DataMask final {
+    uint64_t FieldAddress;
+    DataMaskType Type;
+    uint8_t ValueSize;
+  };
+
   // New Frontend decoding
   struct DecodedBlocks final {
     uint64_t Entry {};
@@ -43,6 +51,7 @@ public:
     DecodedBlockStatus BlockStatus;
     bool IsEntryPoint {};
     bool ForceFullSMCDetection {};
+    fextl::vector<DataMask> DataMasks;
   };
 
   struct DecodedBlockInformation final {
@@ -99,6 +108,7 @@ private:
   bool InstCanContinue() const;
 
   void AddBranchTarget(uint64_t Target);
+  void DetectDataMasks(uint64_t OpAddress, DecodedBlocks& Block);
 
   bool CheckRangeExecutable(uint64_t Address, uint64_t Size);
 
@@ -133,6 +143,8 @@ private:
 
   static constexpr size_t MAX_INST_SIZE = 15;
   uint8_t InstructionSize {};
+  uint8_t LastFieldReadOffset {};
+  uint8_t LastFieldReadSize {};
   std::array<uint8_t, MAX_INST_SIZE> Instruction;
   uint8_t LastEscapePrefix {};
   FEXCore::X86Tables::DecodedInst* DecodeInst;

@@ -128,6 +128,7 @@ struct DecodedOperand {
     RIPRelativeRelocation,
     Literal,
     LiteralRelocation,
+    LiteralPatchable,
     SIB,
     SIBRelocation
   };
@@ -159,6 +160,9 @@ struct DecodedOperand {
   bool IsLiteralRelocation() const {
     return Type == OpType::LiteralRelocation;
   }
+  bool IsLiteralPatchable() const {
+    return Type == OpType::LiteralPatchable;
+  }
   bool IsSIB() const {
     return Type == OpType::SIB;
   }
@@ -167,7 +171,7 @@ struct DecodedOperand {
   }
 
   uint64_t Literal() const {
-    LOGMAN_THROW_A_FMT(IsLiteral(), "Precondition: must be a literal");
+    LOGMAN_THROW_A_FMT(IsLiteral() || IsLiteralPatchable(), "Precondition: must be a literal");
     return Data.Literal.Value;
   }
 
@@ -195,6 +199,13 @@ struct DecodedOperand {
     struct {
       int64_t EntrypointOffset;
     } LiteralRelocation;
+
+    struct {
+      uint64_t Value;
+      uint8_t Size;
+      uint8_t FieldOffset;
+      uint8_t Width;
+    } LiteralPatchable;
 
     struct {
       int64_t Offset;
