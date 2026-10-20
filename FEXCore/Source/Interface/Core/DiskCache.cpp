@@ -943,11 +943,20 @@ namespace DiskCache {
         Reloc.GuestRIP.RegisterIndex = SmallReloc.RIPMove.RegisterIndex;
         Reloc.GuestRIP.GuestRIP = SmallReloc.RIPMove.GuestRIP;
         break;
-      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE):
+      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE): {
+        const uint64_t SiteOffset = SmallReloc.PatchableData.SiteOffset;
+        const uint64_t ValueSize = SmallReloc.PatchableData.ValueSize;
+        if (ValueSize == 0 || ValueSize > sizeof(uint64_t) || SmallReloc.PatchableData.SignExtend > 1 ||
+            SiteOffset > Header.GuestSize || ValueSize > Header.GuestSize - SiteOffset ||
+            SiteOffset > std::numeric_limits<uint64_t>::max() - GuestRIP) {
+          return std::nullopt;
+        }
         Reloc.GuestPatchableData.RegisterIndex = SmallReloc.PatchableData.RegisterIndex;
-        Reloc.GuestPatchableData.ValueSize = SmallReloc.PatchableData.ValueSize;
-        Reloc.GuestPatchableData.SiteAddress = GuestRIP + SmallReloc.PatchableData.SiteOffset;
+        Reloc.GuestPatchableData.ValueSize = static_cast<uint8_t>(ValueSize);
+        Reloc.GuestPatchableData.SignExtend = SmallReloc.PatchableData.SignExtend != 0;
+        Reloc.GuestPatchableData.SiteAddress = GuestRIP + SiteOffset;
         break;
+      }
       default: return std::nullopt;
       }
       HitData.Relocations.push_back(Reloc);
@@ -1255,6 +1264,7 @@ namespace DiskCache {
         SmallReloc.Type = uint8_t(Reloc.Header.Type);
         SmallReloc.PatchableData.RegisterIndex = Reloc.GuestPatchableData.RegisterIndex;
         SmallReloc.PatchableData.ValueSize = Reloc.GuestPatchableData.ValueSize;
+        SmallReloc.PatchableData.SignExtend = Reloc.GuestPatchableData.SignExtend ? 1 : 0;
         SmallReloc.PatchableData.SiteOffset = static_cast<uint32_t>(Reloc.GuestPatchableData.SiteAddress - GuestRIP);
         SmallRelocs[SmallIdx++] = SmallReloc;
         break;

@@ -91,6 +91,7 @@ namespace DiskCache {
       struct __attribute__((packed)) {
         uint8_t RegisterIndex;
         uint8_t ValueSize;
+        uint8_t SignExtend;
         uint32_t SiteOffset;
       } PatchableData;
     };
@@ -209,7 +210,7 @@ namespace DiskCache {
     std::optional<uint64_t> MakeCodeKey(Core::InternalThreadState* Thread, const std::optional<ExecutableFileSectionInfo>& Region, uint64_t GuestRIP);
 
     FEXCore::Context::ContextImpl* CTX;
-    static const uint16_t FormatVersion = 2;
+    static const uint16_t FormatVersion = 3;
     XXH128_hash_t BucketHash;
     fextl::vector<fextl::unique_ptr<IndexedDB>> ROCacheDBs;
     fextl::unique_ptr<IndexedDB> RWCacheDB;
