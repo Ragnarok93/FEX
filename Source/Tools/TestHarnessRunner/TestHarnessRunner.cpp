@@ -134,6 +134,24 @@ void RegisterLongJumpHandler(FEX::HLE::SignalDelegator* Handler) {
                      "[FEX-CACHE-FAULT] signal=%d guest-rip=%llx host-pc=%llx fault-address=%p signal-code=%d\\n",
                      Signal, static_cast<unsigned long long>(GuestRIP), static_cast<unsigned long long>(HostPC),
                      SignalInfo ? SignalInfo->si_addr : nullptr, SignalInfo ? SignalInfo->si_code : 0);
+#if defined(__aarch64__)
+        const auto* UC = reinterpret_cast<const ucontext_t*>(ucontext);
+        const auto* HostBytes = reinterpret_cast<const uint32_t*>(HostPC);
+        std::fprintf(stderr, "[FEX-CACHE-FAULT] host-insns:");
+        for (size_t i = 0; i < 8; ++i) {
+          std::fprintf(stderr, " %08x", HostBytes[i]);
+        }
+        std::fprintf(stderr, "\\n[FEX-CACHE-FAULT] regs x0=%llx x1=%llx x2=%llx x3=%llx x4=%llx x5=%llx x6=%llx x7=%llx sp=%llx\\n",
+                     static_cast<unsigned long long>(UC->uc_mcontext.regs[0]),
+                     static_cast<unsigned long long>(UC->uc_mcontext.regs[1]),
+                     static_cast<unsigned long long>(UC->uc_mcontext.regs[2]),
+                     static_cast<unsigned long long>(UC->uc_mcontext.regs[3]),
+                     static_cast<unsigned long long>(UC->uc_mcontext.regs[4]),
+                     static_cast<unsigned long long>(UC->uc_mcontext.regs[5]),
+                     static_cast<unsigned long long>(UC->uc_mcontext.regs[6]),
+                     static_cast<unsigned long long>(UC->uc_mcontext.regs[7]),
+                     static_cast<unsigned long long>(UC->uc_mcontext.sp));
+#endif
         DidFault = true;
         return false;
       }
