@@ -91,8 +91,14 @@ jobs:
           ctest --test-dir build --output-on-failure --timeout 302 \
             -R 'pcmpxstri_32bit_mode\.asm$'
           test -n "$(find "$FEX_DISKCACHEPATH" -type f -name '*.foz' -size +0c -print -quit)"
-          ctest --test-dir build --output-on-failure --timeout 302 \
-            -R 'pcmpxstri_32bit_mode\.asm$'
+          if ! ctest --test-dir build --output-on-failure --timeout 302 \
+            -R 'pcmpxstri_32bit_mode\.asm$'; then
+            echo "Disk-cache reuse failed; rerunning verbosely for diagnostics"
+            ctest --test-dir build --output-on-failure --verbose --timeout 302 \
+              -R 'pcmpxstri_32bit_mode\.asm$' || true
+            cat build/Testing/Temporary/LastTest.log || true
+            exit 1
+          fi
 
       - name: Record build metadata
         if: always()
@@ -117,6 +123,7 @@ jobs:
           path: |
             stage/
             build/compile_commands.json
+            build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
           retention-days: 14
   wcp-package:
