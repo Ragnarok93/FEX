@@ -16,6 +16,7 @@ $end_info$
 #include "LinuxSyscalls/x64/Syscalls.h"
 #include "LinuxSyscalls/SignalDelegator.h"
 #include <ucontext.h>
+#include <dlfcn.h>
 #endif
 
 #include "Common/HostFeatures.h"
@@ -134,6 +135,19 @@ void RegisterLongJumpHandler(FEX::HLE::SignalDelegator* Handler) {
                      "[FEX-CACHE-FAULT] signal=%d guest-rip=%llx host-pc=%llx fault-address=%p signal-code=%d\\n",
                      Signal, static_cast<unsigned long long>(GuestRIP), static_cast<unsigned long long>(HostPC),
                      SignalInfo ? SignalInfo->si_addr : nullptr, SignalInfo ? SignalInfo->si_code : 0);
+#if defined(__aarch64__)
+        Dl_info HostInfo {};
+        if (dladdr(reinterpret_cast<void*>(HostPC), &HostInfo)) {
+          std::fprintf(stderr, "[FEX-CACHE-FAULT] module=%s symbol=%s module-offset=%llx symbol-offset=%llx\\n",
+                       HostInfo.dli_fname ? HostInfo.dli_fname : "?",
+                       HostInfo.dli_sname ? HostInfo.dli_sname : "?",
+                       HostInfo.dli_fbase ? static_cast<unsigned long long>(HostPC - reinterpret_cast<uintptr_t>(HostInfo.dli_fbase)) : 0ULL,
+                       HostInfo.dli_saddr ? static_cast<unsigned long long>(HostPC - reinterpret_cast<uintptr_t>(HostInfo.dli_saddr)) : 0ULL);
+        } else {
+          std::fprintf(stderr, "[FEX-CACHE-FAULT] dladdr failed for host-pc=%llx\\n",
+                       static_cast<unsigned long long>(HostPC));
+        }
+#endif
 #if defined(__aarch64__)
         const auto* UC = reinterpret_cast<const ucontext_t*>(ucontext);
         const auto* HostBytes = reinterpret_cast<const uint32_t*>(HostPC);
