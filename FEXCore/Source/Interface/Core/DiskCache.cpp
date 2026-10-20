@@ -268,7 +268,7 @@ namespace DiskCache {
           return Entry.GuestSize == BlobHeader.GuestSize &&
                  std::memcmp(&Entry.GuestHash, &BlobHeader.GuestHash, sizeof(BlobHeader.GuestHash)) == 0;
         });
-        if (Duplicate == Entries.end()) {
+        if (Duplicate == Entries.end() && Entries.size() < MAX_LOOKUP_KEY_VARIANTS) {
           Entries.push_back({this, IndexBlobPayload->cache_db_file_offset, IndexBlobPayload->size,
                              BlobHeader.GuestSize, BlobHeader.GuestHash});
         }
@@ -353,9 +353,13 @@ namespace DiskCache {
                std::memcmp(&Entry.GuestHash, &BlobHeader.GuestHash, sizeof(BlobHeader.GuestHash)) == 0;
       });
     };
+    auto IsVariantBucketFull = [&]() {
+      auto It = Index.find(Hash);
+      return !IsMetadataKey && It != Index.end() && It->second.size() >= MAX_LOOKUP_KEY_VARIANTS;
+    };
     {
       std::lock_guard Guard(IndexMutex);
-      if (AlreadyHasVariant()) {
+      if (AlreadyHasVariant() || IsVariantBucketFull()) {
         return true;
       }
     }
@@ -371,7 +375,7 @@ namespace DiskCache {
     // append duplicate records and consume the bounded cache capacity unnecessarily.
     {
       std::lock_guard Guard(IndexMutex);
-      if (AlreadyHasVariant()) {
+      if (AlreadyHasVariant() || IsVariantBucketFull()) {
         CacheFOZ.Unlock();
         IndexFOZ.Unlock();
         return true;
@@ -574,6 +578,10 @@ namespace DiskCache {
     fextl::string BasePath = BasePathOverride();
     if (BasePath.empty()) {
       BasePath = FEXCore::Config::GetCacheDirectory() + "DiskCache/";
+    }
+    // A user-specified cache path need not include a trailing path separator.
+    if (!BasePath.empty() && BasePath.back() != '/') {
+      BasePath += "/";
     }
     const fextl::string MachineBucketName = fextl::fmt::format("{:016x}", MachineBucketHash);
     FHU::Filesystem::CreateDirectories(BasePath);

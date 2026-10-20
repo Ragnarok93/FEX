@@ -167,6 +167,8 @@ namespace DiskCache {
     static constexpr uint32_t STORE_LOCK_TIMEOUT_MS = 1000;
     static constexpr uint64_t BIG_MAPPING_SIZE = 1ULL << 33;
     static constexpr uint64_t MAX_CACHE_SIZE_BYTES = 1ULL << 30;
+    // Bound memory and lookup time for pathological/self-modifying code buckets.
+    static constexpr uint32_t MAX_LOOKUP_KEY_VARIANTS = 500;
 
     FOZFile CacheFOZ;
     uint8_t* CacheFileMapping = nullptr;

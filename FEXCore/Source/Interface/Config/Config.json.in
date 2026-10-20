@@ -151,6 +151,7 @@
       "DiskCacheMemorySize": {
         "Type": "uint32",
         "Default": "0",
+        "AffectsCodeGen": "false",
         "Desc": [
           "Maximum memory in bytes for the disk-cache read LRU; zero disables the read LRU"
         ]
@@ -158,6 +159,7 @@
       "DiskCacheMaxFileSize": {
         "Type": "uint64",
         "Default": "1073741824",
+        "AffectsCodeGen": "false",
         "Desc": [
           "Maximum disk-cache data file size in bytes; zero disables the capacity limit"
         ]
@@ -165,6 +167,7 @@
       "DiskCachePruneStaleEntries": {
         "Type": "bool",
         "Default": "true",
+        "AffectsCodeGen": "false",
         "Desc": [
           "Remove stale FEX machine-cache directories on startup"
         ]
