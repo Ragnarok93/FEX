@@ -235,6 +235,9 @@ public:
   }
 
   void MarkMonoBackpatcherBlock(uint64_t BlockEntry) override;
+  std::atomic<uint64_t>& GetMonoBackPatcherBlock() {
+    return MonoBackpatcherBlock;
+  }
 
 public:
   struct {
