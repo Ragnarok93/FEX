@@ -939,6 +939,13 @@
         "DestSize": "Size"
       },
 
+      "GPR = PatchableGuestCRC OpSize:#Size, i64:$Value, i64:$GuestAddress, i64:$GuestSize": {
+        "Desc": ["Loads a guest instruction CRC in a patchable way",
+                 "On disk-cache load the CRC is recomputed from current guest bytes"
+                ],
+        "DestSize": "Size"
+      },
+
       "GPR = EntrypointOffset OpSize:#Size, i64:$Offset": {
         "Desc": ["Returns the <entrypoint> + Offset address",
                  "When the size is 4 bytes then 32-bit overflow and underflow needs to work"
