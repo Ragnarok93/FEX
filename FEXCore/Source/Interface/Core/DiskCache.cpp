@@ -183,7 +183,8 @@ namespace DiskCache {
            static_cast<uint64_t>(Header.EntryPointCount) * sizeof(BlobEntryPoint) +
            static_cast<uint64_t>(Header.SmallRelocCount) * sizeof(BlobSmallRelocation) +
            static_cast<uint64_t>(Header.ThunkRelocCount) * sizeof(BlobThunkRelocation) +
-           static_cast<uint64_t>(Header.TouchedGuestPagesCount) * sizeof(int64_t);
+           static_cast<uint64_t>(Header.TouchedGuestPagesCount) * sizeof(int64_t) +
+           static_cast<uint64_t>(Header.GuestSize);
   }
 
   bool IndexedDB::Open(const fextl::string& CacheDBName, bool ReadOnly) {
