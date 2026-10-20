@@ -541,6 +541,18 @@ public:
   }
 
   /**
+   * @brief Assert that this buffer is no longer owned by the client.
+   */
+  void ValidateDisownedOrFree() const {
+#if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
+    auto OwnedState = ClientOwnedFlag.load();
+    LOGMAN_THROW_A_FMT(
+      OwnedState == IntrusivePooledAllocator::ClientFlags::FLAG_DISOWNED || OwnedState == IntrusivePooledAllocator::ClientFlags::FLAG_FREE,
+      "ThreadPoolAllocator should have been disowned!");
+#endif
+  }
+
+  /**
    * @brief Disown or unclaim the buffer, letting the `Allocator` know it can reclaim the buffer
    *
    * Once the `ReownOrClaimBuffer` function has been used, this must be called to let the `Allocator` know it is safe to reclaim a buffer.
