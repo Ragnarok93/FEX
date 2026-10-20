@@ -661,7 +661,10 @@ namespace DiskCache {
       RONames.remove_prefix(Delim + 1);
     }
 
-    if (IsWritingDiskCache()) {
+    // The zero-buffer mode is deliberately synchronous and must also work for
+    // embedders/tests that do not install a frontend thread-creation callback.
+    // Only create the background writer when queued writes are actually enabled.
+    if (IsWritingDiskCache() && MaxWriteBufferBytes != 0) {
       Writer = fextl::make_unique<WorkQueueThread>();
     }
   }
