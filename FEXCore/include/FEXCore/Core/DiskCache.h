@@ -106,12 +106,9 @@ namespace DiskCache {
   };
 
   struct CodeHitData {
+    // Each lookup owns a writable copy of the serialized blob. Relocations can
+    // therefore be applied in-place without mutating the shared memory-cache LRU.
     fextl::vector<uint8_t> Blob;
-    // Relocations mutate host code, so it must have per-lookup storage and never
-    // alias the shared serialized-blob LRU.
-    fextl::vector<uint8_t> HostCodeCopy;
-    // Non-owning spans point into HostCodeCopy and either Blob or CachedBlob.
-    fextl::shared_ptr<fextl::vector<uint8_t>> CachedBlob;
     std::span<uint8_t> HostCode;
     std::span<const BlobEntryPoint> EntryPoints;
     fextl::vector<FEXCore::CPU::Relocation> Relocations;
@@ -126,10 +123,8 @@ namespace DiskCache {
         return *this;
       }
 
-      // fextl::vector moves can copy their allocation in unoptimized builds.
-      // Save offsets before moving the owning vectors, then rebuild every span
-      // into the destination storage. Copying the old span pointers here leaves
-      // them dangling when the source vector's allocation is released.
+      // Save offsets before moving the owning blob. Rebuild spans after the move
+      // because fextl::vector may relocate its allocation in unoptimized builds.
       const auto GetOffset = [](const void* Pointer, const void* Base, size_t Size) -> std::optional<size_t> {
         if (!Pointer || !Base) {
           return std::nullopt;
@@ -143,39 +138,25 @@ namespace DiskCache {
       };
 
       const size_t HostCodeSize = Other.HostCode.size();
-      const auto HostCodeOffset = GetOffset(Other.HostCode.data(), Other.HostCodeCopy.data(), Other.HostCodeCopy.size());
+      const auto HostCodeOffset = GetOffset(Other.HostCode.data(), Other.Blob.data(), Other.Blob.size());
       const size_t EntryPointCount = Other.EntryPoints.size();
-      const auto EntryPointsOffset = Other.CachedBlob
-        ? GetOffset(Other.EntryPoints.data(), Other.CachedBlob->data(), Other.CachedBlob->size())
-        : GetOffset(Other.EntryPoints.data(), Other.Blob.data(), Other.Blob.size());
-      const bool EntryPointsInCachedBlob = static_cast<bool>(Other.CachedBlob);
+      const auto EntryPointsOffset = GetOffset(Other.EntryPoints.data(), Other.Blob.data(), Other.Blob.size());
 
       Blob = std::move(Other.Blob);
-      HostCodeCopy = std::move(Other.HostCodeCopy);
-      CachedBlob = std::move(Other.CachedBlob);
       Relocations = std::move(Other.Relocations);
       GuestPages = std::move(Other.GuestPages);
 
-      if (HostCodeOffset && *HostCodeOffset <= HostCodeCopy.size() &&
-          HostCodeSize <= HostCodeCopy.size() - *HostCodeOffset) {
-        HostCode = {HostCodeCopy.data() + *HostCodeOffset, HostCodeSize};
+      if (HostCodeOffset && *HostCodeOffset <= Blob.size() &&
+          HostCodeSize <= Blob.size() - *HostCodeOffset) {
+        HostCode = {Blob.data() + *HostCodeOffset, HostCodeSize};
       } else {
         HostCode = {};
       }
 
-      const uint8_t* EntryPointBase = nullptr;
-      size_t EntryPointStorageSize = 0;
-      if (EntryPointsInCachedBlob && CachedBlob) {
-        EntryPointBase = CachedBlob->data();
-        EntryPointStorageSize = CachedBlob->size();
-      } else {
-        EntryPointBase = Blob.data();
-        EntryPointStorageSize = Blob.size();
-      }
       const size_t EntryPointBytes = EntryPointCount * sizeof(BlobEntryPoint);
-      if (EntryPointsOffset && *EntryPointsOffset <= EntryPointStorageSize &&
-          EntryPointBytes <= EntryPointStorageSize - *EntryPointsOffset) {
-        EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(EntryPointBase + *EntryPointsOffset), EntryPointCount};
+      if (EntryPointsOffset && *EntryPointsOffset <= Blob.size() &&
+          EntryPointBytes <= Blob.size() - *EntryPointsOffset) {
+        EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(Blob.data() + *EntryPointsOffset), EntryPointCount};
       } else {
         EntryPoints = {};
       }
