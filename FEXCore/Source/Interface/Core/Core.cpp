@@ -884,7 +884,6 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         }
 
         if (CachedHostCode != 0) {
-          Thread->CurrentFrame->State.rip = GuestRIP;
           Thread->FrontendDecoder->DelayedDisownBuffer();
           Thread->FrontendDecoder->ValidateDisownedOrFree();
           Thread->OpDispatcher->ValidateDisownedOrFree();
