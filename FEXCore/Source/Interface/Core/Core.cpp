@@ -857,8 +857,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
       // DiskCache::Lookup returns a validated, relocated, per-lookup host-code
       // blob, matching upstream's cache-hit contract. The memory LRU keeps the
       // serialized, unrelocated blob so relocation writes never mutate shared data.
-      {
-        auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
+      auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
         if (LoadedCode.BlockBegin) {
 
           // File-backed entries are relative to the image base; anonymous entries
@@ -898,10 +897,8 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
             Thread->OpDispatcher->ValidateDisownedOrFree();
             return reinterpret_cast<uintptr_t>(EntryPoint->second);
           }
-          // A malformed or incompatible cache entry falls through to normal
-          // compilation rather than returning a null host entrypoint.
-        }
-      }
+      // A malformed or incompatible cache entry falls through to normal
+      // compilation rather than returning a null host entrypoint.
     }
   }
 
