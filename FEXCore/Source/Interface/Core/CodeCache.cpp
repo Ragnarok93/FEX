@@ -662,15 +662,12 @@ bool CodeCache::ApplyPackedCodeRelocations(uint64_t GuestEntry, std::span<std::b
       if (ValueSize == 0 || ValueSize > sizeof(uint64_t) || Reloc.PatchableData.SignExtend > 1) {
         return false;
       }
-      uint64_t Value = 0;
-      std::memcpy(&Value, reinterpret_cast<const void*>(SiteAddress), ValueSize);
-      if (Reloc.PatchableData.SignExtend && ValueSize < sizeof(Value)) {
-        const unsigned BitCount = ValueSize * 8;
-        const uint64_t SignBit = uint64_t {1} << (BitCount - 1);
-        Value = (Value ^ SignBit) - SignBit;
-      }
-      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.PatchableData.RegisterIndex), Value,
-                           CPU::Arm64Emitter::PadType::DOPAD);
+      // Match upstream ReadLiveGuestData: these immediates are signed guest
+      // values. Sign extension is determined by the serialized value width,
+      // not by a cache-format flag that can disagree with the original emitter.
+      const int64_t Value = ReadLiveGuestDisplacement(SiteAddress, ValueSize);
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.PatchableData.RegisterIndex),
+                           static_cast<uint64_t>(Value), CPU::Arm64Emitter::PadType::DOPAD);
       break;
     }
     case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE: {
@@ -685,7 +682,7 @@ bool CodeCache::ApplyPackedCodeRelocations(uint64_t GuestEntry, std::span<std::b
       break;
     }
     case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL: {
-      if (Reloc.PatchableData.ValueSize != 4 || Reloc.PatchableData.SignExtend != 0) {
+      if (Reloc.PatchableData.ValueSize != 4) {
         return false;
       }
       const uint64_t Target = GetLiveGuestRelativeBranchTarget(
