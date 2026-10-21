@@ -84,7 +84,7 @@ jobs:
         env:
           FEX_DISKCACHE: "1"
           FEX_DISKCACHEMEMORYBUFFERMB: "0"
-          FEX_DISKCACHEPATH: \${{ runner.temp }}/fex-disk-cache-smoke
+          FEX_DISKCACHEPATH: ${{ runner.temp }}/fex-disk-cache-smoke
         run: |
           rm -rf "$FEX_DISKCACHEPATH"
           mkdir -p "$FEX_DISKCACHEPATH"
