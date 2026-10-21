@@ -860,10 +860,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
       auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
         if (LoadedCode.BlockBegin) {
 
-          // File-backed entries are relative to the image base; anonymous entries
-          // are relative to the block entrypoint. The full guest hash was checked by
-          // DiskCache::Lookup before any cached machine code can be loaded.
-          const uint64_t EntryPointBase = (Region && Region->FileStartVA != 0) ? Region->FileStartVA : GuestRIP;
+          // Match upstream: cached guest entrypoints are always block-relative,
+          // regardless of whether the block came from a file-backed mapping.
+          const uint64_t EntryPointBase = GuestRIP;
           fextl::set<uint64_t> EntryPoints;
           for (auto [GuestOffset, HostAddr] : LoadedCode.EntryPoints) {
             if (GuestOffset > std::numeric_limits<uint64_t>::max() - EntryPointBase) {
