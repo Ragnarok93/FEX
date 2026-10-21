@@ -142,13 +142,13 @@ namespace DiskCache {
         return static_cast<size_t>(P - B);
       };
 
-      const size_t HostCodeSize = HostCode.size();
-      const auto HostCodeOffset = GetOffset(HostCode.data(), HostCodeCopy.data(), HostCodeCopy.size());
-      const size_t EntryPointCount = EntryPoints.size();
-      const auto EntryPointsOffset = CachedBlob
-        ? GetOffset(EntryPoints.data(), CachedBlob->data(), CachedBlob->size())
-        : GetOffset(EntryPoints.data(), Blob.data(), Blob.size());
-      const bool EntryPointsInCachedBlob = static_cast<bool>(CachedBlob);
+      const size_t HostCodeSize = Other.HostCode.size();
+      const auto HostCodeOffset = GetOffset(Other.HostCode.data(), Other.HostCodeCopy.data(), Other.HostCodeCopy.size());
+      const size_t EntryPointCount = Other.EntryPoints.size();
+      const auto EntryPointsOffset = Other.CachedBlob
+        ? GetOffset(Other.EntryPoints.data(), Other.CachedBlob->data(), Other.CachedBlob->size())
+        : GetOffset(Other.EntryPoints.data(), Other.Blob.data(), Other.Blob.size());
+      const bool EntryPointsInCachedBlob = static_cast<bool>(Other.CachedBlob);
 
       Blob = std::move(Other.Blob);
       HostCodeCopy = std::move(Other.HostCodeCopy);
