@@ -83,6 +83,7 @@ jobs:
       - name: Compare cached code against fresh JIT output
         env:
           FEX_DISKCACHE: "1"
+          FEX_MEMCACHE: "64"
           FEX_DISKCACHEMEMORYBUFFERMB: "0"
           CTEST_PARALLEL_LEVEL: "1"
           FEX_DISKCACHEPATH: ${{ runner.temp }}/fex-disk-cache-smoke

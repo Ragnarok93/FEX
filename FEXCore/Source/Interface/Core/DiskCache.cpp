@@ -15,6 +15,7 @@
 #include "FEXCore/fextl/memory.h"
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <limits>
 #include <algorithm>
 #include <charconv>
@@ -583,6 +584,7 @@ namespace DiskCache {
   void DiskCache::Init(FEXCore::Context::ContextImpl* CTX) {
     this->CTX = CTX;
     MaxWriteBufferBytes = std::min<uint64_t>(static_cast<uint64_t>(MemoryBufferMB()) * 1024ULL * 1024ULL, 1ULL << 30);
+    MaxMemoryCacheBytes = GetMemoryCacheLimitBytes(MemoryCacheSize);
 
     if (!EnableDiskCache) {
       return;
@@ -832,6 +834,25 @@ namespace DiskCache {
     return XXH3_64bits(&BlobKeyBytes, sizeof(BlobKeyBytes));
   }
 
+  // FEX_MEMCACHE overrides the decoded-blob LRU capacity in MiB. A value of
+  // zero disables the memory cache; invalid values leave the FEX config option
+  // (DiskCacheMemorySize, expressed in bytes) in control.
+  static uint64_t GetMemoryCacheLimitBytes(uint32_t ConfiguredBytes) {
+    const char* Value = std::getenv("FEX_MEMCACHE");
+    if (!Value || !*Value) {
+      return std::min<uint64_t>(ConfiguredBytes, 1ULL << 30);
+    }
+
+    uint64_t MiB {};
+    const char* End = Value + std::strlen(Value);
+    const auto [ParsedEnd, Error] = std::from_chars(Value, End, MiB);
+    if (Error != std::errc {} || ParsedEnd != End) {
+      return std::min<uint64_t>(ConfiguredBytes, 1ULL << 30);
+    }
+
+    return std::min<uint64_t>(MiB, 1024) * 1024ULL * 1024ULL;
+  }
+
   static uint64_t MakeMemoryCacheKey(uint64_t LookupKey, uint32_t GuestSize, const XXH128_hash_t& GuestHash) {
     struct __attribute__((packed)) {
       uint64_t LookupKey;
@@ -853,7 +874,7 @@ namespace DiskCache {
   }
 
   fextl::shared_ptr<fextl::vector<uint8_t>> DiskCache::StoreMemoryCache(uint64_t Key, fextl::vector<uint8_t>&& Blob) {
-    const uint64_t MaxBytes = MemoryCacheSize;
+    const uint64_t MaxBytes = MaxMemoryCacheBytes;
     if (MaxBytes == 0 || Blob.empty() || Blob.size() > MaxBytes) {
       // Do not consume the caller's buffer when it does not fit in the LRU.
       return {};

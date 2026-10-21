@@ -283,6 +283,7 @@ namespace DiskCache {
     fextl::list<uint64_t> MemoryCacheLRU;
     std::mutex MemoryCacheLock;
     uint64_t MemoryCacheCurrentBytes = 0;
+    uint64_t MaxMemoryCacheBytes = 0;
 
     fextl::shared_ptr<fextl::vector<uint8_t>> LookupMemoryCache(uint64_t Key);
     fextl::shared_ptr<fextl::vector<uint8_t>> StoreMemoryCache(uint64_t Key, fextl::vector<uint8_t>&& Blob);
