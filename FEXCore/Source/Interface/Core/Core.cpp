@@ -850,9 +850,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   std::optional<ExecutableFileSectionInfo> Region = SyscallHandler->LookupExecutableFileSection(Thread, GuestRIP);
   std::optional<DiskCache::CodeHitData> Hit;
   std::optional<uint64_t> DiskCacheGuestCodeKey;
+  const bool DiskCacheDiagnostic = std::getenv("FEX_DISKCACHE_DIAGNOSTIC") != nullptr;
   {
     Hit = DiskCache.Lookup(Thread, Region, GuestRIP, DiskCacheGuestCodeKey);
-    const bool DiskCacheDiagnostic = std::getenv("FEX_DISKCACHE_DIAGNOSTIC") != nullptr;
     if (Hit) {
       // The cache lookup returns a validated, relocated, per-lookup blob.
       auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
