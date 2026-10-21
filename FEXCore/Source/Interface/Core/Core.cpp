@@ -842,9 +842,11 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     return HostCode;
   }
 
-  // Do not initialize the decoder on a disk-cache hit: the decoder's
-  // DecodeInstructionsAtEntry API requires the instruction stream and performs
-  // decoding. The cache-hit path only needs to release any retained views below.
+  // Decode the requested block before cache lookup so the cache key includes
+  // the actual guest-block footprint (including MaxInst / multi-block boundaries).
+  // On a miss CompileCode reuses/rebuilds this decoder state as needed; on a hit
+  // the normal disown/validation path below releases it before entering cached code.
+  Thread->FrontendDecoder->DecodeInstructionsAtEntry(Thread, reinterpret_cast<const uint8_t*>(GuestRIP), GuestRIP, MaxInst);
 
   std::optional<ExecutableFileSectionInfo> Region = SyscallHandler->LookupExecutableFileSection(Thread, GuestRIP);
   std::optional<DiskCache::CodeHitData> Hit;
