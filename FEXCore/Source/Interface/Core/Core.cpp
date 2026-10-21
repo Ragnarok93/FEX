@@ -933,6 +933,8 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         }
       }
     }
+    LOGMAN_THROW_A_FMT(CachedSize == LiveSize && DiffBytes == 0,
+                       "Disk-cache replay differs from fresh JIT code at guest RIP {:#x}", GuestRIP);
   }
 
   // if this ever fires, we need to serialize the offset into disk cache
