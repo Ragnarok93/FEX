@@ -1069,16 +1069,17 @@ namespace DiskCache {
       HitData.GuestPages.push_back(GuestPage);
     }
 
-    // Match upstream's cache-hit architecture: relocate the private writable
-    // blob inside Lookup, before Core can load it into the executable code buffer.
-    // The memory LRU retains the original serialized bytes, never relocated code.
-    if (!CTX->CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(HitData.HostCode), HitData.Relocations, false)) {
-      return std::nullopt;
-    }
-
+    // Preserve the serialized, unrelocated bytes in the memory LRU before
+    // applying relocations to this lookup's private writable copy.
     if (!FoundInMemoryCache) {
       fextl::vector<uint8_t> MemoryCacheBlob(HitData.Blob.begin(), HitData.Blob.end());
       (void)StoreMemoryCache(MemoryCacheKey, std::move(MemoryCacheBlob));
+    }
+
+    // Match upstream's cache-hit architecture: relocate the private writable
+    // blob inside Lookup, before Core can load it into the executable code buffer.
+    if (!CTX->CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(HitData.HostCode), HitData.Relocations, false)) {
+      return std::nullopt;
     }
     return HitData;
   }
