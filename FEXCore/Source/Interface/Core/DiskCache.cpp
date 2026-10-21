@@ -1206,7 +1206,7 @@ namespace DiskCache {
       const bool IsDataReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE;
       const bool IsRIPReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL ||
                               Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE;
-      if (!IsRelocationInBlock(Reloc, CompiledCode) || (!IsDataReloc && !IsRIPReloc)) {
+      if (!IsDataReloc && !IsRIPReloc) {
         continue;
       }
       const uint64_t SiteAddress = Reloc.GuestPatchableData.SiteAddress;
@@ -1333,10 +1333,7 @@ namespace DiskCache {
     uint32_t SmallIdx = 0;
     uint32_t ThunkIdx = 0;
     for (const auto& Reloc : Relocations) {
-      if (!IsRelocationInBlock(Reloc, CompiledCode)) {
-        continue;
-      }
-      // re-relocate :harold:
+      // Relocations are block-relative, so serialize their offsets directly.
       uint32_t LocalOffset = uint32_t(Reloc.Header.Offset);
 
       switch (Reloc.Header.Type) {
