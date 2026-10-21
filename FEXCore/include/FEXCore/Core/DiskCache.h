@@ -18,6 +18,7 @@
 #include <atomic>
 #include <mutex>
 #include <optional>
+#include <utility>
 #include <span>
 #include <xxhash.h>
 
