@@ -90,13 +90,13 @@ jobs:
           rm -rf "$FEX_DISKCACHEPATH"
           mkdir -p "$FEX_DISKCACHEPATH"
           ctest --test-dir build --output-on-failure --timeout 302 \
-            -R 'pcmpxstri_32bit_mode\.asm$'
+            -R 'jit_500_m/Test_32Bit_H0F3A/pcmpxstri_32bit_mode\.asm$'
           test -n "$(find "$FEX_DISKCACHEPATH" -type f -name '*.foz' -size +0c -print -quit)"
           if ! ctest --test-dir build --output-on-failure --timeout 302 \
-            -R 'pcmpxstri_32bit_mode\.asm$'; then
+            -R 'jit_500_m/Test_32Bit_H0F3A/pcmpxstri_32bit_mode\.asm$'; then
             echo "Disk-cache reuse failed; rerunning verbosely for diagnostics"
             ctest --test-dir build --output-on-failure --verbose --timeout 302 \
-              -R 'pcmpxstri_32bit_mode\.asm$' || true
+              -R 'jit_500_m/Test_32Bit_H0F3A/pcmpxstri_32bit_mode\.asm$' || true
             cat build/Testing/Temporary/LastTest.log || true
             exit 1
           fi
