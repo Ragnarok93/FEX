@@ -691,7 +691,7 @@ bool CodeCache::ApplyPackedCodeRelocations(uint64_t GuestEntry, std::span<std::b
       break;
     }
     case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE: {
-      if (Reloc.PatchableData.ValueSize != 4 || Reloc.PatchableData.SignExtend != 0) {
+      if (Reloc.PatchableData.ValueSize != 4) {
         return false;
       }
       const uint64_t Target = GetLiveGuestRelativeBranchTarget(
