@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 import sys
 import subprocess
+import signal
 from os import path
 from shutil import which
 
@@ -62,6 +63,19 @@ if (disabled_tests.get(current_test)):
 Process = subprocess.Popen(RunnerArgs)
 Process.wait()
 ResultCode = Process.returncode
+
+# Preserve the real child termination reason in CTest logs. Python's sys.exit()
+# maps negative signal return codes to ordinary exit statuses, which otherwise
+# hides whether a cache-replay regression crashed the harness or failed normally.
+if ResultCode != 0:
+    if ResultCode < 0:
+        try:
+            SignalName = signal.Signals(-ResultCode).name
+        except ValueError:
+            SignalName = f"signal {-ResultCode}"
+        print(f"Test harness terminated by {SignalName} (return code {ResultCode})", file=sys.stderr)
+    else:
+        print(f"Test harness exited with status {ResultCode}", file=sys.stderr)
 
 # Check for known failures - try full test name first, then partial test name
 is_known_failure = known_failures.get(full_test_name) or known_failures.get(current_test)
