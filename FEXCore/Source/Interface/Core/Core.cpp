@@ -974,16 +974,17 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     }
   }
 
-  // Disk Cache: anonymous entries are safe only when the cache relocation filter
-  // can establish that rebased references remain valid.
-  {
-    std::span<const FEXCore::CPU::Relocation> Relocations;
-    if (DebugData && DebugData->Relocations) {
-      Relocations = *DebugData->Relocations;
-    }
-    std::span<const uint8_t> GuestCode = {reinterpret_cast<const uint8_t*>(StartAddr), Length};
-    const Frontend::Decoder::DecodedBlockInformation* BlockInfo = NeedsAddGuestCodeRanges ? Thread->FrontendDecoder->GetDecodedBlockInfo() : nullptr;
+  // Match upstream: do not store cache entries while generating a code cache.
+  // In that mode backend relocations are intentionally retained across compiles.
+  if (!CodeCache.IsGeneratingCache) {
     if (DiskCacheGuestCodeKey) {
+      std::span<const FEXCore::CPU::Relocation> Relocations;
+      if (DebugData && DebugData->Relocations) {
+        Relocations = *DebugData->Relocations;
+      }
+      std::span<const uint8_t> GuestCode = {reinterpret_cast<const uint8_t*>(StartAddr), Length};
+      const Frontend::Decoder::DecodedBlockInformation* BlockInfo =
+        NeedsAddGuestCodeRanges ? Thread->FrontendDecoder->GetDecodedBlockInfo() : nullptr;
       DiskCache.Store(Thread, Region, GuestRIP, *DiskCacheGuestCodeKey, GuestCode, CompiledCode, Relocations, BlockInfo);
     }
 
