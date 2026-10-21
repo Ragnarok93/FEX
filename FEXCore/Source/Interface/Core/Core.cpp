@@ -851,14 +851,13 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   std::optional<ExecutableFileSectionInfo> Region = SyscallHandler->LookupExecutableFileSection(Thread, GuestRIP);
   std::optional<DiskCache::CodeHitData> Hit;
   std::optional<uint64_t> DiskCacheGuestCodeKey;
-  bool DiskCacheHitRelocationsApplied = false;
-  bool LoadDiskCacheCode = true;
   {
     Hit = DiskCache.Lookup(Thread, Region, GuestRIP, DiskCacheGuestCodeKey);
     if (Hit) {
-      DiskCacheHitRelocationsApplied = CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(Hit->HostCode), Hit->Relocations, false);
-
-      if (DiskCacheHitRelocationsApplied && LoadDiskCacheCode) {
+      // DiskCache::Lookup returns a validated, relocated, per-lookup host-code
+      // blob, matching upstream's cache-hit contract. The memory LRU keeps the
+      // serialized, unrelocated blob so relocation writes never mutate shared data.
+      {
         auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
         if (LoadedCode.BlockBegin) {
 
