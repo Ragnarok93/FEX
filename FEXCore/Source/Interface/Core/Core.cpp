@@ -10,6 +10,7 @@ $end_info$
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #ifdef ZYDIS_DISASSEMBLER
 #include <Zydis/Zydis.h>
 #endif
@@ -851,15 +852,16 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   std::optional<uint64_t> DiskCacheGuestCodeKey;
   {
     Hit = DiskCache.Lookup(Thread, Region, GuestRIP, DiskCacheGuestCodeKey);
+    const bool DiskCacheDiagnostic = std::getenv("FEX_DISKCACHE_DIAGNOSTIC") != nullptr;
     if (Hit) {
-      // DiskCache::Lookup returns a validated, relocated, per-lookup host-code
-      // blob, matching upstream's cache-hit contract. The memory LRU keeps the
-      // serialized, unrelocated blob so relocation writes never mutate shared data.
+      // The cache lookup returns a validated, relocated, per-lookup blob.
       auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
-      if (LoadedCode.BlockBegin) {
-        // Follow upstream's cache-hit mapping directly from the serialized
-        // guest/host offset pairs. Do not route entrypoint selection through a
-        // second map, which can obscure the exact persisted offsets.
+      if (LoadedCode.BlockBegin && DiskCacheDiagnostic) {
+        // Load but do not publish/execute the cached block. Compile fresh below and
+        // compare the fully relocated host bytes to isolate replay corruption.
+        LogMan::Msg::IFmt("[DISKCACHE-COMPARE] loaded guest-rip={:x} cached-size={} host={:x}",
+                         GuestRIP, Hit->HostCode.size(), reinterpret_cast<uintptr_t>(LoadedCode.BlockBegin));
+      } else if (LoadedCode.BlockBegin) {
         fextl::set<uint64_t> EntryPoints;
         for (const auto& EntryPoint : Hit->EntryPoints) {
           if (EntryPoint.GuestRIP > std::numeric_limits<uint64_t>::max() - GuestRIP) {
@@ -890,8 +892,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
           return CachedHostCode;
         }
       }
-      // A malformed or incompatible cache entry falls through to normal
-      // compilation rather than returning a null host entrypoint.
+      // A malformed or incompatible entry falls through to normal compilation.
     }
   }
 
@@ -905,6 +906,33 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   } else if (!DebugData) {
     // DebugData wasn't populated, indicating another thread raced us for compiling this block
     return reinterpret_cast<uintptr_t>(CodePtr);
+  }
+
+  if (DiskCacheDiagnostic && Hit) {
+    const size_t CachedSize = Hit->HostCode.size();
+    const size_t LiveSize = CompiledCode.Size;
+    const size_t CommonSize = std::min(CachedSize, LiveSize);
+    size_t FirstDiff = CommonSize;
+    size_t DiffBytes = 0;
+    for (size_t i = 0; i < CommonSize; ++i) {
+      if (Hit->HostCode[i] != CompiledCode.BlockBegin[i]) {
+        if (FirstDiff == CommonSize) FirstDiff = i;
+        ++DiffBytes;
+      }
+    }
+    LogMan::Msg::IFmt("[DISKCACHE-COMPARE] guest-rip={:x} cached-size={} live-size={} first-diff={} differing-bytes={}",
+                     GuestRIP, CachedSize, LiveSize,
+                     FirstDiff == CommonSize ? -1LL : static_cast<long long>(FirstDiff), DiffBytes);
+    if (FirstDiff != CommonSize) {
+      size_t Printed = 0;
+      for (size_t i = FirstDiff; i < CommonSize && Printed < 16; ++i) {
+        if (Hit->HostCode[i] != CompiledCode.BlockBegin[i]) {
+          LogMan::Msg::IFmt("[DISKCACHE-COMPARE] offset={} cached={:02x} live={:02x}",
+                           i, Hit->HostCode[i], CompiledCode.BlockBegin[i]);
+          ++Printed;
+        }
+      }
+    }
   }
 
   // if this ever fires, we need to serialize the offset into disk cache
