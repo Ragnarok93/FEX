@@ -842,10 +842,8 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     return HostCode;
   }
 
-  // Decode the requested block before cache lookup so the cache key includes
-  // the actual guest-block footprint (including MaxInst / multi-block boundaries).
-  // On a miss CompileCode reuses/rebuilds this decoder state as needed; on a hit
-  // the normal disown/validation path below releases it before entering cached code.
+  // Prepare decoder state before cache lookup, but defer decoding until a cache miss.
+  // Cache hits release this buffer before entering the cached host code.
   Thread->FrontendDecoder->SetupDecodeInstructionsAtEntry(Thread, GuestRIP, MaxInst);
 
   std::optional<ExecutableFileSectionInfo> Region = SyscallHandler->LookupExecutableFileSection(Thread, GuestRIP);
