@@ -1083,7 +1083,10 @@ namespace DiskCache {
 
     // Match upstream's cache-hit architecture: relocate the private writable
     // blob inside Lookup, before Core can load it into the executable code buffer.
-    if (!CTX->CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(HitData.HostCode), HitData.Relocations, false)) {
+    const std::span<const BlobSmallRelocation> SmallRelocSpan {SmallRelocs, Header.SmallRelocCount};
+    const std::span<const BlobThunkRelocation> ThunkRelocSpan {ThunkRelocs, Header.ThunkRelocCount};
+    if (!CTX->CodeCache.ApplyPackedCodeRelocations(GuestRIP, std::as_writable_bytes(HitData.HostCode),
+                                                   SmallRelocSpan, ThunkRelocSpan)) {
       return std::nullopt;
     }
     return HitData;
