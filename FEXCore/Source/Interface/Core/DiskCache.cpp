@@ -699,7 +699,20 @@ namespace DiskCache {
       return std::nullopt;
     }
 
-    Thread->FrontendDecoder->DecodeInstructionsAtEntry(Thread, reinterpret_cast<const uint8_t*>(GuestRIP), GuestRIP, 4);
+    // Core::CompileBlock prepares the requested block before cache lookup so the
+    // cache key can include the actual MaxInst / multi-block footprint. Re-decoding
+    // here with a hard-coded limit of four instructions would overwrite that decoder
+    // state before a cache hit returns to the dispatcher. Reuse an existing decode
+    // only when it starts at this exact entrypoint; otherwise build the small,
+    // deterministic anonymous-code identity decode as before.
+    const auto* ExistingDecodedInfo = Thread->FrontendDecoder->GetDecodedBlockInfo();
+    const bool HasRequestedEntryDecode =
+      ExistingDecodedInfo && !ExistingDecodedInfo->Blocks.empty() &&
+      ExistingDecodedInfo->Blocks.front().Entry == GuestRIP &&
+      ExistingDecodedInfo->Blocks.front().BlockStatus == Frontend::Decoder::DecodedBlockStatus::SUCCESS;
+    if (!HasRequestedEntryDecode) {
+      Thread->FrontendDecoder->DecodeInstructionsAtEntry(Thread, reinterpret_cast<const uint8_t*>(GuestRIP), GuestRIP, 4);
+    }
     const auto* DecodedInfo = Thread->FrontendDecoder->GetDecodedBlockInfo();
     if (!DecodedInfo || DecodedInfo->Blocks.empty()) {
       if (DisownDecoderBuffer) {
