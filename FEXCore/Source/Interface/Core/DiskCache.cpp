@@ -1090,9 +1090,9 @@ namespace DiskCache {
     DiskCache* Self;
     IndexedDB* DB;
     MesaFOZ::foz_payload_key Key;
-    fextl::vector<uint8_t> Blob;
+    fextl::shared_ptr<fextl::vector<uint8_t>> Blob;
     uint64_t ReservedBytes {};
-    CacheStoreWorkItem(DiskCache* Self, IndexedDB* DB, const MesaFOZ::foz_payload_key& Key, fextl::vector<uint8_t>&& Blob, uint64_t ReservedBytes)
+    CacheStoreWorkItem(DiskCache* Self, IndexedDB* DB, const MesaFOZ::foz_payload_key& Key, fextl::shared_ptr<fextl::vector<uint8_t>> Blob, uint64_t ReservedBytes)
       : Self(Self)
       , DB(DB)
       , Key(Key)
@@ -1104,7 +1104,7 @@ namespace DiskCache {
       }
     }
     void Run() override {
-      DB->StoreCacheBlob(Key, Blob, Self->Index, Self->IndexLock);
+      DB->StoreCacheBlob(Key, *Blob, Self->Index, Self->IndexLock);
     }
   };
 
@@ -1297,9 +1297,11 @@ namespace DiskCache {
     const size_t TotalSize = GuestCodeOffset + GuestCode.size();
 
     // we'll copy everything into here and pass it to the Writer, then return to caller quickly
-    fextl::vector<uint8_t> Blob;
-    Blob.resize(TotalSize);
-    uint8_t* BlobData = Blob.data();
+    // Allocate the final shared backing storage before taking BlobData. This mirrors
+    // upstream b49837f: moving a vector into shared ownership after taking data()
+    // can leave stale pointers under -O0 when the move becomes a copy.
+    auto BlobRef = fextl::make_shared<fextl::vector<uint8_t>>(TotalSize);
+    uint8_t* BlobData = BlobRef->data();
 
     const auto BlockFootprint = MakeBlockFootprint(DecodedBlockInfo, GuestRIP);
     if (!BlockFootprint) {
@@ -1420,18 +1422,18 @@ namespace DiskCache {
     // Buffer queued writes only within the configured memory budget. If disabled or full,
     // store synchronously rather than growing an unbounded queue of cache blobs.
     uint64_t ReservedBytes = 0;
-    if (MaxWriteBufferBytes && Blob.size() <= MaxWriteBufferBytes) {
+    if (MaxWriteBufferBytes && BlobRef->size() <= MaxWriteBufferBytes) {
       uint64_t Pending = PendingWriteBufferBytes.load(std::memory_order_relaxed);
-      while (Pending <= MaxWriteBufferBytes - Blob.size()) {
-        if (PendingWriteBufferBytes.compare_exchange_weak(Pending, Pending + Blob.size(), std::memory_order_relaxed)) {
-          ReservedBytes = Blob.size();
+      while (Pending <= MaxWriteBufferBytes - BlobRef->size()) {
+        if (PendingWriteBufferBytes.compare_exchange_weak(Pending, Pending + BlobRef->size(), std::memory_order_relaxed)) {
+          ReservedBytes = BlobRef->size();
           break;
         }
       }
     }
 
     if (ReservedBytes) {
-      auto Work = fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, std::move(Blob), ReservedBytes);
+      auto Work = fextl::make_unique<CacheStoreWorkItem>(this, RWCacheDB.get(), Key, BlobRef, ReservedBytes);
       if (Writer) {
         Writer->QueueWork(std::move(Work));
       } else {
@@ -1440,7 +1442,7 @@ namespace DiskCache {
         Work->Run();
       }
     } else {
-      RWCacheDB->StoreCacheBlob(Key, Blob, Index, IndexLock);
+      RWCacheDB->StoreCacheBlob(Key, *BlobRef, Index, IndexLock);
     }
     return true;
   }
