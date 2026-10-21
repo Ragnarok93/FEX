@@ -72,6 +72,10 @@ public:
     return &BlockInfo;
   }
 
+  uint64_t GetMaxInst() const {
+    return MaxInst;
+  }
+
   uint64_t DecodedMinAddress {};
   uint64_t DecodedMaxAddress {~0ULL};
 
