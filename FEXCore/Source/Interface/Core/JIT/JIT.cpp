@@ -1116,10 +1116,6 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
     CodeBegin += Delta;
     CodeData.HostCodeOffset = CodeData.BlockBegin - CurrentCodeBuffer->Ptr;
 
-    for (std::size_t Idx = PrevNumAllocations; Idx != Relocations.size(); ++Idx) {
-      Relocations[Idx].Header.Offset += CodeBuffers.LatestOffset;
-    }
-
     // Copy over CodeBuffer contents
     memcpy(GetCursorAddress<uint8_t*>(), TempCodeBuffer, TempSize);
     SetCursorOffset(CodeBuffers.LatestOffset + TempSize);
