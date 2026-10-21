@@ -801,14 +801,13 @@ namespace DiskCache {
     return XXH3_64bits_digest(&HashState);
   }
 
-  uint64_t DiskCache::MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t CodeKey, uint64_t BlockFootprint,
+  uint64_t DiskCache::MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t CodeKey,
                                   bool Writable, bool MonoBackpatcher) {
     struct __attribute__((packed)) {
       uint64_t CodeKey;
       XXH128_hash_t BucketHash;
-      uint64_t BlockFootprint;
       uint8_t Flags;
-    } BlobKeyBytes = {CodeKey, BucketHash, BlockFootprint, 0};
+    } BlobKeyBytes = {CodeKey, BucketHash, 0};
 
     if (Writable) {
       BlobKeyBytes.Flags |= 1 << 0;
@@ -885,10 +884,8 @@ namespace DiskCache {
     if (!IsReadingDiskCache()) {
       return std::nullopt;
     }
-    const auto BlockFootprint = MakeBlockFootprint(Thread->FrontendDecoder->GetDecodedBlockInfo(), GuestRIP);
-    if (!BlockFootprint) {
-      return std::nullopt;
-    }
+    // Upstream performs the cache lookup from the entrypoint/module identity before
+    // decoding the block. The stored guest extents and hash validate the selected blob.
     const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP, false);
     if (!CodeKeyValue) {
       return std::nullopt;
@@ -896,7 +893,7 @@ namespace DiskCache {
     const uint64_t CodeKey = *CodeKeyValue;
     GuestCodeKey = CodeKey;
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
-    uint64_t Hash = MakeBlobKey(Thread, CodeKey, *BlockFootprint, RangeInfo.Writable,
+    uint64_t Hash = MakeBlobKey(Thread, CodeKey, RangeInfo.Writable,
                                 GuestRIP == CTX->GetMonoBackPatcherBlock());
 
     fextl::vector<IndexEntry> Candidates;
@@ -1309,7 +1306,7 @@ namespace DiskCache {
     // into an unowned buffer and double-disown it.
     const uint64_t CodeKey = GuestCodeKey;
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
-    uint64_t BlobKey = MakeBlobKey(Thread, CodeKey, *BlockFootprint, RangeInfo.Writable,
+    uint64_t BlobKey = MakeBlobKey(Thread, CodeKey, RangeInfo.Writable,
                                    GuestRIP == CTX->GetMonoBackPatcherBlock());
     MesaFOZ::foz_payload_key Key = {};
     fextl::string BlobName = fextl::fmt::format("{:016x}", BlobKey);
