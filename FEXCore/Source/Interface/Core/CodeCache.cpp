@@ -660,8 +660,10 @@ bool CodeCache::ApplyPackedCodeRelocations(uint64_t GuestEntry, std::span<std::b
     }
     case CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
       const uint64_t Pointer = GuestEntry + Reloc.RIPMove.GuestRIP;
+      // InsertGuestRIPMove reserves an automatic constant-load footprint. Replaying
+      // with DOPAD can overwrite real instructions after a short constant load.
       Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.RIPMove.RegisterIndex), Pointer,
-                           CPU::Arm64Emitter::PadType::DOPAD);
+                           CPU::Arm64Emitter::PadType::AUTOPAD);
       break;
     }
     case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE: {
@@ -728,8 +730,9 @@ bool CodeCache::ApplyPackedCodeRelocations(uint64_t GuestEntry, std::span<std::b
     if (Pointer == ~0ULL) {
       return false;
     }
+    // InsertNamedThunkRelocation uses AUTOPAD; keep the replay footprint identical.
     Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.RegisterIndex), Pointer,
-                         CPU::Arm64Emitter::PadType::DOPAD);
+                         CPU::Arm64Emitter::PadType::AUTOPAD);
   }
   return true;
 }
@@ -759,8 +762,9 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
       }
       // TODO: Pointers are required to fit within 48-bit VA space.
       // But forcing 6-byte broke relocations.
+      // Match InsertNamedThunkRelocation's AUTOPAD footprint.
       Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.NamedThunkMove.RegisterIndex), Pointer,
-                           CPU::Arm64Emitter::PadType::DOPAD);
+                           CPU::Arm64Emitter::PadType::AUTOPAD);
       break;
     }
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
@@ -771,7 +775,8 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
       uint64_t Pointer = Reloc.GuestRIP.GuestRIP + GuestEntry;
       // TODO: Pointers are required to fit within 48-bit VA space.
       // But forcing 6-byte broke relocations.
-      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIP.RegisterIndex), Pointer, CPU::Arm64Emitter::PadType::DOPAD);
+      // Match InsertGuestRIPMove's AUTOPAD footprint to avoid clobbering following code.
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIP.RegisterIndex), Pointer, CPU::Arm64Emitter::PadType::AUTOPAD);
       break;
     }
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE: {
