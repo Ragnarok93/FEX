@@ -754,12 +754,48 @@ namespace DiskCache {
     return XXH3_64bits_digest(&HashState);
   }
 
-  uint64_t DiskCache::MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t CodeKey, bool Writable, bool MonoBackpatcher) {
+  // Match cache entries to the decoded guest-block footprint, not only the
+  // executable's file offset. The same RIP can compile to different host blocks
+  // under different MaxInst / multi-block settings.
+  static std::optional<uint64_t> MakeBlockFootprint(const Frontend::Decoder::DecodedBlockInformation* DecodedInfo,
+                                                     uint64_t GuestRIP) {
+    if (!DecodedInfo || DecodedInfo->Blocks.empty()) {
+      return std::nullopt;
+    }
+
+    XXH3_state_t HashState;
+    XXH3_64bits_reset(&HashState);
+    for (const auto& SubBlock : DecodedInfo->Blocks) {
+      if (SubBlock.BlockStatus != Frontend::Decoder::DecodedBlockStatus::SUCCESS ||
+          SubBlock.Size > std::numeric_limits<uint64_t>::max() - SubBlock.Entry) {
+        return std::nullopt;
+      }
+
+      const uint64_t BlockOffset = SubBlock.Entry - GuestRIP;
+      const uint64_t BlockSize = SubBlock.Size;
+      XXH3_64bits_update(&HashState, &BlockOffset, sizeof(BlockOffset));
+      XXH3_64bits_update(&HashState, &BlockSize, sizeof(BlockSize));
+      for (const auto& Mask : SubBlock.DataMasks) {
+        if (Mask.FieldAddress < SubBlock.Entry || Mask.FieldAddress > SubBlock.Entry + SubBlock.Size ||
+            Mask.ValueSize > SubBlock.Entry + SubBlock.Size - Mask.FieldAddress) {
+          return std::nullopt;
+        }
+        const uint64_t MaskOffset = Mask.FieldAddress - GuestRIP;
+        XXH3_64bits_update(&HashState, &MaskOffset, sizeof(MaskOffset));
+        XXH3_64bits_update(&HashState, &Mask.ValueSize, sizeof(Mask.ValueSize));
+      }
+    }
+    return XXH3_64bits_digest(&HashState);
+  }
+
+  uint64_t DiskCache::MakeBlobKey(Core::InternalThreadState* Thread, const uint64_t CodeKey, uint64_t BlockFootprint,
+                                  bool Writable, bool MonoBackpatcher) {
     struct __attribute__((packed)) {
       uint64_t CodeKey;
       XXH128_hash_t BucketHash;
+      uint64_t BlockFootprint;
       uint8_t Flags;
-    } BlobKeyBytes = {CodeKey, BucketHash, 0};
+    } BlobKeyBytes = {CodeKey, BucketHash, BlockFootprint, 0};
 
     if (Writable) {
       BlobKeyBytes.Flags |= 1 << 0;
@@ -836,14 +872,18 @@ namespace DiskCache {
     if (!IsReadingDiskCache()) {
       return std::nullopt;
     }
+    const auto BlockFootprint = MakeBlockFootprint(Thread->FrontendDecoder->GetDecodedBlockInfo(), GuestRIP);
+    if (!BlockFootprint) {
+      return std::nullopt;
+    }
     const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP, false);
     if (!CodeKeyValue) {
       return std::nullopt;
     }
     const uint64_t CodeKey = *CodeKeyValue;
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
-    uint64_t Hash =
-      MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock());
+    uint64_t Hash = MakeBlobKey(Thread, CodeKey, *BlockFootprint, RangeInfo.Writable,
+                                GuestRIP == CTX->GetMonoBackPatcherBlock());
 
     fextl::vector<IndexEntry> Candidates;
     {
@@ -1247,14 +1287,18 @@ namespace DiskCache {
     Blob.resize(TotalSize);
     uint8_t* BlobData = Blob.data();
 
+    const auto BlockFootprint = MakeBlockFootprint(DecodedBlockInfo, GuestRIP);
+    if (!BlockFootprint) {
+      return false;
+    }
     const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP, true);
     if (!CodeKeyValue) {
       return false;
     }
     const uint64_t CodeKey = *CodeKeyValue;
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
-    uint64_t BlobKey =
-      MakeBlobKey(Thread, CodeKey, RangeInfo.Writable, GuestRIP == CTX->GetMonoBackPatcherBlock());
+    uint64_t BlobKey = MakeBlobKey(Thread, CodeKey, *BlockFootprint, RangeInfo.Writable,
+                                   GuestRIP == CTX->GetMonoBackPatcherBlock());
     MesaFOZ::foz_payload_key Key = {};
     fextl::string BlobName = fextl::fmt::format("{:016x}", BlobKey);
     memcpy(Key.bytes, BlobName.data(), BlobName.size());
