@@ -1078,10 +1078,6 @@ namespace DiskCache {
     return HitData;
   }
 
-  static inline bool IsRelocationInBlock(const FEXCore::CPU::Relocation& Reloc, const CPU::CPUBackend::CompiledCode& CompiledCode) {
-    return Reloc.Header.Offset >= CompiledCode.HostCodeOffset && Reloc.Header.Offset < CompiledCode.HostCodeOffset + CompiledCode.Size;
-  }
-
   struct DiskCache::CacheStoreWorkItem final : WorkQueueThread::WorkItem {
     DiskCache* Self;
     IndexedDB* DB;
@@ -1124,9 +1120,6 @@ namespace DiskCache {
     // todo what are they exactly? caching those blocks is great when it works, so need to figure this out and make finer-grained if we can
     if (RelocationFilter) {
       for (const auto& Reloc : Relocations) {
-        if (!IsRelocationInBlock(Reloc, CompiledCode)) {
-          continue;
-        }
         if (Reloc.Header.Type != CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL && Reloc.Header.Type != CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE) {
           continue;
         }
@@ -1161,9 +1154,6 @@ namespace DiskCache {
     uint32_t ThunkRelocCount = 0;
     for (const auto& Reloc : Relocations) {
       // relocs aren't cleared every time if IsGeneratingCache, so filter just in case
-      if (!IsRelocationInBlock(Reloc, CompiledCode)) {
-        continue;
-      }
       if (Reloc.Header.Type == CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE) {
         ThunkRelocCount++;
       } else {
@@ -1192,9 +1182,6 @@ namespace DiskCache {
     // Validate every serialized patch site against the guest-code payload. CRC sites
     // span an instruction (up to 16 bytes); data relocations patch an immediate of at most 8.
     for (const auto& Reloc : Relocations) {
-      if (!IsRelocationInBlock(Reloc, CompiledCode)) {
-        continue;
-      }
       const bool IsDataReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE;
       const bool IsCRCReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE;
       const bool IsRIPReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL ||
@@ -1350,7 +1337,7 @@ namespace DiskCache {
         continue;
       }
       // re-relocate :harold:
-      uint32_t LocalOffset = uint32_t(Reloc.Header.Offset - CompiledCode.HostCodeOffset);
+      uint32_t LocalOffset = uint32_t(Reloc.Header.Offset);
 
       switch (Reloc.Header.Type) {
       // it's important to zero-init the element completely so we don't have garbage in unused fields
