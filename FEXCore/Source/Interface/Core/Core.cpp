@@ -842,11 +842,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     return HostCode;
   }
 
-  // Match upstream's decoder lifecycle: even a disk-cache hit must initialize
-  // the frontend at this guest entry before releasing its decode buffers below.
-  // Without this setup, the cache-hit path can enter cached code with an
-  // uninitialized frontend decode context (notably in multiblock mode).
-  Thread->FrontendDecoder->SetupDecodeInstructionsAtEntry(Thread, GuestRIP, MaxInst);
+  // Do not initialize the decoder on a disk-cache hit: the decoder's
+  // DecodeInstructionsAtEntry API requires the instruction stream and performs
+  // decoding. The cache-hit path only needs to release any retained views below.
 
   std::optional<ExecutableFileSectionInfo> Region = SyscallHandler->LookupExecutableFileSection(Thread, GuestRIP);
   std::optional<DiskCache::CodeHitData> Hit;
