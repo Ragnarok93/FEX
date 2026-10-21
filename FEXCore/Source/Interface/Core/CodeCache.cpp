@@ -638,25 +638,9 @@ bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> C
   for (size_t j = 0; j < EntryRelocations.size(); ++j) {
     const FEXCore::CPU::Relocation& Reloc = EntryRelocations[j];
 
-    // Disk-cache relocation offsets must be relative to the beginning of this
-    // host-code blob. Never let a malformed/stale offset make the emitter write
-    // beyond the writable cache-hit copy.
-    size_t PatchSize = 16;
-    switch (Reloc.Header.Type) {
-    case FEXCore::CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL:
-    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL:
-    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL:
-      PatchSize = sizeof(uint64_t);
-      break;
-    default:
-      break;
-    }
-    if (Reloc.Header.Offset > Code.size_bytes() ||
-        PatchSize > Code.size_bytes() - Reloc.Header.Offset) {
-      LogMan::Msg::EFmt("CodeCache: rejecting relocation type {} at offset {} for host-code size {}",
-                        ToUnderlying(Reloc.Header.Type), Reloc.Header.Offset, Code.size_bytes());
-      return false;
-    }
+    // Match upstream's relocation contract: offsets are block-relative, and
+    // every relocation must point inside the compiled host-code blob.
+    LOGMAN_THROW_A_FMT(Reloc.Header.Offset < Code.size_bytes(), "Invalid relocation offset");
     Emitter.SetCursorOffset(Reloc.Header.Offset);
 
     switch (Reloc.Header.Type) {
