@@ -1325,12 +1325,13 @@ namespace DiskCache {
     // pack and relocate entrypoints
     auto* EntryPoints = reinterpret_cast<BlobEntryPoint*>(BlobData + EntryPointsOffset);
     uint32_t EntryIdx = 0;
-    const uint64_t EntryPointBase = (Region && Region->FileStartVA != 0) ? Region->FileStartVA : GuestRIP;
+    // Match upstream: guest entrypoints are serialized relative to this block's
+    // entry RIP, independent of the executable's mapping/segment base.
     for (auto [GuestAddr, HostAddr] : CompiledCode.EntryPoints) {
-      if (GuestAddr < EntryPointBase || GuestAddr - EntryPointBase > std::numeric_limits<uint32_t>::max()) {
+      if (GuestAddr < GuestRIP || GuestAddr - GuestRIP > std::numeric_limits<uint32_t>::max()) {
         return false;
       }
-      EntryPoints[EntryIdx++] = {GuestAddr - EntryPointBase, uint32_t(HostAddr - CompiledCode.BlockBegin)};
+      EntryPoints[EntryIdx++] = {GuestAddr - GuestRIP, uint32_t(HostAddr - CompiledCode.BlockBegin)};
     }
 
     // pack relocations
