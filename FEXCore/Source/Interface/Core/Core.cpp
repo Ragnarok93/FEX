@@ -856,44 +856,41 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
       // blob, matching upstream's cache-hit contract. The memory LRU keeps the
       // serialized, unrelocated blob so relocation writes never mutate shared data.
       auto LoadedCode = Thread->CPUBackend->LoadCachedCode(Hit->HostCode, Hit->EntryPoints);
-        if (LoadedCode.BlockBegin) {
+      if (LoadedCode.BlockBegin) {
+        // Follow upstream's cache-hit mapping directly from the serialized
+        // guest/host offset pairs. Do not route entrypoint selection through a
+        // second map, which can obscure the exact persisted offsets.
+        fextl::set<uint64_t> EntryPoints;
+        for (const auto& EntryPoint : Hit->EntryPoints) {
+          if (EntryPoint.GuestRIP > std::numeric_limits<uint64_t>::max() - GuestRIP) {
+            return 0;
+          }
+          EntryPoints.insert(GuestRIP + EntryPoint.GuestRIP);
+        }
+        for (auto CodePage : Hit->GuestPages) {
+          if (Thread->LookupCache->AddBlockExecutableRange(Thread, EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
+            SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+          }
+        }
 
-          // Match upstream: cached guest entrypoints are always block-relative,
-          // regardless of whether the block came from a file-backed mapping.
-          const uint64_t EntryPointBase = GuestRIP;
-          fextl::set<uint64_t> EntryPoints;
-          for (auto [GuestOffset, HostAddr] : LoadedCode.EntryPoints) {
-            if (GuestOffset > std::numeric_limits<uint64_t>::max() - EntryPointBase) {
-              return 0;
-            }
-            EntryPoints.insert(GuestOffset + EntryPointBase);
+        uintptr_t CachedHostCode = 0;
+        for (const auto& EntryPoint : Hit->EntryPoints) {
+          const uint64_t GuestEntry = GuestRIP + EntryPoint.GuestRIP;
+          void* HostAddr = LoadedCode.BlockBegin + EntryPoint.HostOffset;
+          Thread->LookupCache->AddBlockMapping(Thread, GuestEntry, Hit->GuestPages, HostAddr);
+          if (GuestEntry == GuestRIP) {
+            CachedHostCode = reinterpret_cast<uintptr_t>(HostAddr);
           }
-          for (auto CodePage : Hit->GuestPages) {
-            if (Thread->LookupCache->AddBlockExecutableRange(Thread, EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
-              SyscallHandler->MarkGuestExecutableRange(Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
-            }
-          }
-          for (auto [GuestOffset, HostAddr] : LoadedCode.EntryPoints) {
-            Thread->LookupCache->AddBlockMapping(Thread, GuestOffset + EntryPointBase, Hit->GuestPages, HostAddr);
-          }
+        }
 
-          const uint64_t EntryPointOffset = GuestRIP - EntryPointBase;
-          auto EntryPoint = LoadedCode.EntryPoints.find(EntryPointOffset);
-          if (EntryPoint != LoadedCode.EntryPoints.end() && EntryPoint->second != nullptr) {
-            // Match the upstream cache-hit lifetime handling: the decoder and
-            // dispatcher may still hold views into guest code buffers used while
-            // resolving this block. Release/validate those views before entering
-            // cached machine code.
-            // A cache hit can enter a block without passing through the normal
-            // compile path that refreshes the saved guest RIP. Keep the frame in
-            // sync with the actual entrypoint so HLT/fault handling sees the right
-            // guest instruction address.
-            Thread->CurrentFrame->State.rip = GuestRIP;
-            Thread->FrontendDecoder->DelayedDisownBuffer();
-            Thread->FrontendDecoder->ValidateDisownedOrFree();
-            Thread->OpDispatcher->ValidateDisownedOrFree();
-            return reinterpret_cast<uintptr_t>(EntryPoint->second);
-          }
+        if (CachedHostCode != 0) {
+          Thread->CurrentFrame->State.rip = GuestRIP;
+          Thread->FrontendDecoder->DelayedDisownBuffer();
+          Thread->FrontendDecoder->ValidateDisownedOrFree();
+          Thread->OpDispatcher->ValidateDisownedOrFree();
+          return CachedHostCode;
+        }
+      }
       // A malformed or incompatible cache entry falls through to normal
       // compilation rather than returning a null host entrypoint.
     }
