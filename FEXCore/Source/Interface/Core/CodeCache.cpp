@@ -352,6 +352,14 @@ bool CodeCache::LoadData(Core::InternalThreadState* Thread, std::byte* MappedCac
     return false;
   }
 
+  // The cache payload is a native binary layout. Never interpret a cache
+  // written by a different layout version, even if its magic and FEX git hash
+  // happen to match (for example, after a cherry-pick or a partial upgrade).
+  if (header.FormatVersion != 1) {
+    LogMan::Msg::IFmt("Unsupported code cache format version {}; expected 1; skipping", header.FormatVersion);
+    return false;
+  }
+
   if (!ranges::equal(header.FEXVersion, GIT_HASH)) {
     LogMan::Msg::IFmt("Cache generated from old FEX version {:02x}, current is {:02x}; skipping", fmt::join(header.FEXVersion, ""),
                       fmt::join(GIT_HASH, ""));
