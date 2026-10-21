@@ -110,7 +110,7 @@ namespace DiskCache {
     // Relocations mutate host code, so it must have per-lookup storage and never
     // alias the shared serialized-blob LRU.
     fextl::vector<uint8_t> HostCodeCopy;
-    // Non-owning spans for metadata point into Blob or CachedBlob.
+    // Non-owning spans point into HostCodeCopy and either Blob or CachedBlob.
     fextl::shared_ptr<fextl::vector<uint8_t>> CachedBlob;
     std::span<uint8_t> HostCode;
     std::span<const BlobEntryPoint> EntryPoints;
