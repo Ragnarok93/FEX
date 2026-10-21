@@ -710,6 +710,7 @@ namespace DiskCache {
       ExistingDecodedInfo && !ExistingDecodedInfo->Blocks.empty() &&
       ExistingDecodedInfo->Blocks.front().Entry == GuestRIP &&
       ExistingDecodedInfo->Blocks.front().BlockStatus == Frontend::Decoder::DecodedBlockStatus::SUCCESS;
+    const uint64_t RequestedMaxInst = Thread->FrontendDecoder->GetMaxInst();
     if (!HasRequestedEntryDecode) {
       Thread->FrontendDecoder->DecodeInstructionsAtEntry(Thread, reinterpret_cast<const uint8_t*>(GuestRIP), GuestRIP, 4);
     }
@@ -717,6 +718,8 @@ namespace DiskCache {
     if (!DecodedInfo || DecodedInfo->Blocks.empty()) {
       if (DisownDecoderBuffer) {
         Thread->FrontendDecoder->DelayedDisownBuffer();
+      } else if (!HasRequestedEntryDecode) {
+        Thread->FrontendDecoder->SetupDecodeInstructionsAtEntry(Thread, GuestRIP, RequestedMaxInst);
       }
       return std::nullopt;
     }
@@ -760,6 +763,10 @@ namespace DiskCache {
     // after compilation and must release its temporary decode buffer here.
     if (DisownDecoderBuffer) {
       Thread->FrontendDecoder->DelayedDisownBuffer();
+    } else if (!HasRequestedEntryDecode) {
+      // The temporary four-instruction identity decode must not replace the
+      // caller's configured decoder setup used by compilation after a miss.
+      Thread->FrontendDecoder->SetupDecodeInstructionsAtEntry(Thread, GuestRIP, RequestedMaxInst);
     }
     if (!Valid) {
       return std::nullopt;
