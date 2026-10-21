@@ -1509,7 +1509,7 @@ bool Decoder::CheckIfCacheable(FEXCore::Core::InternalThreadState& Thread, const
   return !Uncacheable;
 }
 
-void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thread, const uint8_t* _InstStream, uint64_t PC, uint64_t MaxInst) {
+void Decoder::SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thread, uint64_t PC, uint64_t MaxInst) {
   FEXCORE_PROFILE_SCOPED("DecodeInstructions");
   BlockInfo.TotalInstructionCount = 0;
   BlockInfo.Blocks.clear();
@@ -1527,9 +1527,6 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
 
   EntryPoint = PC;
   BlockInfo.EntryPoints = {PC};
-  InstStream = _InstStream;
-
-  uint64_t TotalInstructions {};
 
   SectionMinAddress = 0;
   SectionMaxAddress = ~0ULL;
@@ -1550,16 +1547,23 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
   // Entry is a jump target
   BlocksToDecode = {PC};
 
-  uint64_t CurrentCodePage = PC & FEXCore::Utils::FEX_PAGE_MASK;
-
+  CurrentBlockTargets.clear();
+  CurrentCodePage = PC & FEXCore::Utils::FEX_PAGE_MASK;
   BlockInfo.CodePages = {CurrentCodePage};
+}
 
-  if (MaxInst == 0) {
-    MaxInst = CTX->Config.MaxInstPerBlock;
-  }
+void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thread, const uint8_t* _InstStream, uint64_t PC, uint64_t MaxInst) {
+  SetupDecodeInstructionsAtEntry(Thread, PC, MaxInst);
+  DecodeLoop(_InstStream);
+}
 
+void Decoder::DecodeLoop(const uint8_t* _InstStream) {
+  FEXCORE_PROFILE_SCOPED("DecodeInstructions");
   bool EntryBlock {true};
   bool FinalInstruction {false};
+  uint64_t TotalInstructions {};
+  uint64_t CurrentCodePage = EntryPoint & FEXCore::Utils::FEX_PAGE_MASK;
+  InstStream = _InstStream;
   const bool WantsDataMasks = CTX->DiskCache.IsReadingDiskCache() || CTX->DiskCache.IsWritingDiskCache();
 
   while (!FinalInstruction && !BlocksToDecode.empty()) {
@@ -1677,7 +1681,7 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
       }
 
       // Check if we need to end the entire multiblock
-      FinalInstruction = DecodedSize >= MaxInst || DecodedSize >= DefaultDecodedBufferSize || TotalInstructions >= MaxInst;
+      FinalInstruction = DecodedSize >= this->MaxInst || DecodedSize >= DefaultDecodedBufferSize || TotalInstructions >= this->MaxInst;
       if (FinalInstruction) {
         break;
       }
