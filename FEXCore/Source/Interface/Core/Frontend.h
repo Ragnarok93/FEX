@@ -64,6 +64,8 @@ public:
 
   Decoder(FEXCore::Core::InternalThreadState* Thread);
   bool CheckIfCacheable(FEXCore::Core::InternalThreadState&, const uint8_t* InstStream, uint64_t PC, uint64_t MaxInst);
+  void SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thread, uint64_t PC, uint64_t MaxInst);
+  void DecodeLoop(const uint8_t* InstStream);
   void DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thread, const uint8_t* InstStream, uint64_t PC, uint64_t MaxInst);
 
   const DecodedBlockInformation* GetDecodedBlockInfo() const {
@@ -134,6 +136,7 @@ private:
   FEXCore::X86Tables::DecodedInst* DecodedBuffer {};
   Utils::PoolBufferWithTimedRetirement<FEXCore::X86Tables::DecodedInst*, 5000, 500> PoolObject;
   size_t DecodedSize {};
+  uint64_t MaxInst {};
 
   uint64_t ExecutableRangeBase {};
   uint64_t ExecutableRangeEnd {};
