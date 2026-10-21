@@ -881,7 +881,7 @@ namespace DiskCache {
   }
 
   std::optional<CodeHitData> DiskCache::Lookup(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region,
-                                               uint64_t GuestRIP) {
+                                               uint64_t GuestRIP, std::optional<uint64_t>& GuestCodeKey) {
     if (!IsReadingDiskCache()) {
       return std::nullopt;
     }
@@ -894,6 +894,7 @@ namespace DiskCache {
       return std::nullopt;
     }
     const uint64_t CodeKey = *CodeKeyValue;
+    GuestCodeKey = CodeKey;
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
     uint64_t Hash = MakeBlobKey(Thread, CodeKey, *BlockFootprint, RangeInfo.Writable,
                                 GuestRIP == CTX->GetMonoBackPatcherBlock());
@@ -1108,7 +1109,7 @@ namespace DiskCache {
   };
 
   bool DiskCache::Store(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region, uint64_t GuestRIP,
-                        std::span<const uint8_t> GuestCode, const CPU::CPUBackend::CompiledCode& CompiledCode,
+                        uint64_t GuestCodeKey, std::span<const uint8_t> GuestCode, const CPU::CPUBackend::CompiledCode& CompiledCode,
                         std::span<const FEXCore::CPU::Relocation> Relocations, const Frontend::Decoder::DecodedBlockInformation* DecodedBlockInfo) {
     if (!IsWritingDiskCache()) {
       return false;
@@ -1304,11 +1305,10 @@ namespace DiskCache {
     if (!BlockFootprint) {
       return false;
     }
-    const auto CodeKeyValue = MakeCodeKey(Thread, Region, GuestRIP, true);
-    if (!CodeKeyValue) {
-      return false;
-    }
-    const uint64_t CodeKey = *CodeKeyValue;
+    // Reuse the code identity computed during Lookup. Store runs after CompileCode
+    // has released the decoder buffer, so recomputing this key here could decode
+    // into an unowned buffer and double-disown it.
+    const uint64_t CodeKey = GuestCodeKey;
     auto RangeInfo = CTX->SyscallHandler->QueryGuestExecutableRange(Thread, GuestRIP);
     uint64_t BlobKey = MakeBlobKey(Thread, CodeKey, *BlockFootprint, RangeInfo.Writable,
                                    GuestRIP == CTX->GetMonoBackPatcherBlock());

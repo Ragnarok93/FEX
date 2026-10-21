@@ -850,10 +850,11 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
   std::optional<ExecutableFileSectionInfo> Region = SyscallHandler->LookupExecutableFileSection(Thread, GuestRIP);
   std::optional<DiskCache::CodeHitData> Hit;
+  std::optional<uint64_t> DiskCacheGuestCodeKey;
   bool DiskCacheHitRelocationsApplied = false;
   bool LoadDiskCacheCode = true;
   {
-    Hit = DiskCache.Lookup(Thread, Region, GuestRIP);
+    Hit = DiskCache.Lookup(Thread, Region, GuestRIP, DiskCacheGuestCodeKey);
     if (Hit) {
       DiskCacheHitRelocationsApplied = CodeCache.ApplyCodeRelocations(GuestRIP, std::as_writable_bytes(Hit->HostCode), Hit->Relocations, false);
 
@@ -983,7 +984,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     }
     std::span<const uint8_t> GuestCode = {reinterpret_cast<const uint8_t*>(StartAddr), Length};
     const Frontend::Decoder::DecodedBlockInformation* BlockInfo = NeedsAddGuestCodeRanges ? Thread->FrontendDecoder->GetDecodedBlockInfo() : nullptr;
-    DiskCache.Store(Thread, Region, GuestRIP, GuestCode, CompiledCode, Relocations, BlockInfo);
+    if (DiskCacheGuestCodeKey) {
+      DiskCache.Store(Thread, Region, GuestRIP, *DiskCacheGuestCodeKey, GuestCode, CompiledCode, Relocations, BlockInfo);
+    }
 
     if (Region && Region->FileStartVA != 0 && CodeMapWriter) {
       CodeMapWriter->AppendBlock(*Region, GuestRIP);

@@ -195,9 +195,10 @@ namespace DiskCache {
   public:
     void Init(FEXCore::Context::ContextImpl* CTX);
 
-    std::optional<CodeHitData> Lookup(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region, uint64_t GuestRIP);
+    std::optional<CodeHitData> Lookup(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region, uint64_t GuestRIP,
+                                      std::optional<uint64_t>& GuestCodeKey);
     bool Store(Core::InternalThreadState* Thread, std::optional<ExecutableFileSectionInfo> Region, uint64_t GuestRIP,
-               std::span<const uint8_t> GuestCode, const CPU::CPUBackend::CompiledCode& CompiledCode,
+               uint64_t GuestCodeKey, std::span<const uint8_t> GuestCode, const CPU::CPUBackend::CompiledCode& CompiledCode,
                std::span<const FEXCore::CPU::Relocation> Relocations, const Frontend::Decoder::DecodedBlockInformation* DecodedBlockInfo);
 
     bool IsWritingDiskCache() const {
