@@ -1010,10 +1010,22 @@ namespace DiskCache {
       case uint8_t(CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL):
         Reloc.NamedSymbolLiteral.Symbol = CPU::RelocNamedSymbolLiteral::NamedSymbol(SmallReloc.Named.Symbol);
         break;
-      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL): Reloc.GuestRIP.GuestRIP = SmallReloc.RIPLiteral.GuestRIP; break;
+      // The on-disk format stores guest RIP targets relative to the block entry.
+      // Reconstruct absolute guest addresses before passing these relocations to
+      // ApplyCodeRelocations (unlike upstream's packed-relocation API, this API
+      // expects fully reconstructed Relocation objects).
+      case uint8_t(CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL):
+        Reloc.GuestRIP.GuestRIP = GuestRIP + SmallReloc.RIPLiteral.GuestRIP;
+        if (!CTX->Config.Is64BitMode) {
+          Reloc.GuestRIP.GuestRIP = static_cast<uint32_t>(Reloc.GuestRIP.GuestRIP);
+        }
+        break;
       case uint8_t(CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE):
         Reloc.GuestRIP.RegisterIndex = SmallReloc.RIPMove.RegisterIndex;
-        Reloc.GuestRIP.GuestRIP = SmallReloc.RIPMove.GuestRIP;
+        Reloc.GuestRIP.GuestRIP = GuestRIP + SmallReloc.RIPMove.GuestRIP;
+        if (!CTX->Config.Is64BitMode) {
+          Reloc.GuestRIP.GuestRIP = static_cast<uint32_t>(Reloc.GuestRIP.GuestRIP);
+        }
         break;
       case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE):
       case uint8_t(CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE):
