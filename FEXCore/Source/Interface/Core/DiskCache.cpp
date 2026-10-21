@@ -1222,9 +1222,13 @@ namespace DiskCache {
     fextl::vector<std::pair<uint32_t, uint32_t>> PatchableFields;
     for (const auto& Reloc : Relocations) {
       const bool IsDataReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE;
+      const bool IsCRCReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE;
       const bool IsRIPReloc = Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL ||
                               Reloc.Header.Type == CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE;
-      if (!IsDataReloc && !IsRIPReloc) {
+      // Upstream excludes every patchable guest-data site from the guest-code hash.
+      // Relocations are re-evaluated against live guest bytes on every lookup,
+      // including CRC relocations.
+      if (!IsDataReloc && !IsCRCReloc && !IsRIPReloc) {
         continue;
       }
       const uint64_t SiteAddress = Reloc.GuestPatchableData.SiteAddress;
