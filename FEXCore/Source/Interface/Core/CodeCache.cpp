@@ -632,6 +632,97 @@ static inline uint64_t GetLiveGuestRelativeBranchTarget(uint64_t SiteAddress, ui
   return Is64BitMode ? Target : static_cast<uint32_t>(Target);
 }
 
+bool CodeCache::ApplyPackedCodeRelocations(uint64_t GuestEntry, std::span<std::byte> Code,
+                                            std::span<const DiskCache::BlobSmallRelocation> SmallRelocs,
+                                            std::span<const DiskCache::BlobThunkRelocation> ThunkRelocs) {
+  CPU::Arm64Emitter Emitter(&CTX, Code.data(), Code.size_bytes());
+  for (const auto& Reloc : SmallRelocs) {
+    if (Reloc.Offset >= Code.size_bytes()) {
+      return false;
+    }
+    Emitter.SetCursorOffset(Reloc.Offset);
+    switch (static_cast<CPU::RelocationTypes>(Reloc.Type)) {
+    case CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL: {
+      Emitter.dc64(GetNamedSymbolLiteral(CTX, CPU::RelocNamedSymbolLiteral::NamedSymbol(Reloc.Named.Symbol)));
+      break;
+    }
+    case CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
+      Emitter.dc64(GuestEntry + Reloc.RIPLiteral.GuestRIP);
+      break;
+    }
+    case CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
+      const uint64_t Pointer = GuestEntry + Reloc.RIPMove.GuestRIP;
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.RIPMove.RegisterIndex), Pointer,
+                           CPU::Arm64Emitter::PadType::DOPAD);
+      break;
+    }
+    case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_DATA_MOVE: {
+      const auto SiteAddress = GuestEntry + Reloc.PatchableData.SiteOffset;
+      const uint8_t ValueSize = Reloc.PatchableData.ValueSize;
+      if (ValueSize == 0 || ValueSize > sizeof(uint64_t) || Reloc.PatchableData.SignExtend > 1) {
+        return false;
+      }
+      uint64_t Value = 0;
+      std::memcpy(&Value, reinterpret_cast<const void*>(SiteAddress), ValueSize);
+      if (Reloc.PatchableData.SignExtend && ValueSize < sizeof(Value)) {
+        const unsigned BitCount = ValueSize * 8;
+        const uint64_t SignBit = uint64_t {1} << (BitCount - 1);
+        Value = (Value ^ SignBit) - SignBit;
+      }
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.PatchableData.RegisterIndex), Value,
+                           CPU::Arm64Emitter::PadType::DOPAD);
+      break;
+    }
+    case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_CRC_MOVE: {
+      const auto SiteAddress = GuestEntry + Reloc.PatchableData.SiteOffset;
+      const uint8_t ValueSize = Reloc.PatchableData.ValueSize;
+      if (ValueSize == 0 || ValueSize > 16 || Reloc.PatchableData.SignExtend != 0) {
+        return false;
+      }
+      const uint64_t Value = FEXCore::Utils::crc32(reinterpret_cast<const uint8_t*>(SiteAddress), ValueSize);
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.PatchableData.RegisterIndex), Value,
+                           CPU::Arm64Emitter::PadType::DOPAD);
+      break;
+    }
+    case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_LITERAL: {
+      if (Reloc.PatchableData.ValueSize != 4 || Reloc.PatchableData.SignExtend != 0) {
+        return false;
+      }
+      const uint64_t Target = GetLiveGuestRelativeBranchTarget(
+        GuestEntry + Reloc.PatchableData.SiteOffset, Reloc.PatchableData.ValueSize, CTX.Config.Is64BitMode);
+      Emitter.dc64(Target);
+      break;
+    }
+    case CPU::RelocationTypes::RELOC_GUEST_PATCHABLE_RIP_MOVE: {
+      if (Reloc.PatchableData.ValueSize != 4 || Reloc.PatchableData.SignExtend != 0) {
+        return false;
+      }
+      const uint64_t Target = GetLiveGuestRelativeBranchTarget(
+        GuestEntry + Reloc.PatchableData.SiteOffset, Reloc.PatchableData.ValueSize, CTX.Config.Is64BitMode);
+      Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.PatchableData.RegisterIndex), Target,
+                           CPU::Arm64Emitter::PadType::DOPAD);
+      break;
+    }
+    default:
+      return false;
+    }
+  }
+  for (const auto& Reloc : ThunkRelocs) {
+    if (Reloc.Offset >= Code.size_bytes()) {
+      return false;
+    }
+    Emitter.SetCursorOffset(Reloc.Offset);
+    const uint64_t Pointer = reinterpret_cast<uint64_t>(CTX.ThunkHandler->LookupThunk(
+      *reinterpret_cast<const IR::SHA256Sum*>(Reloc.SymbolHash)));
+    if (Pointer == ~0ULL) {
+      return false;
+    }
+    Emitter.LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.RegisterIndex), Pointer,
+                         CPU::Arm64Emitter::PadType::DOPAD);
+  }
+  return true;
+}
+
 bool CodeCache::ApplyCodeRelocations(uint64_t GuestEntry, std::span<std::byte> Code,
                                      std::span<const FEXCore::CPU::Relocation> EntryRelocations, bool ForStorage) {
   CPU::Arm64Emitter Emitter(&CTX, Code.data(), Code.size_bytes());
