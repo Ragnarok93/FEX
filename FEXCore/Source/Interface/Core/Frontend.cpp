@@ -1516,6 +1516,10 @@ void Decoder::SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState*
   VisitedBlocks.clear();
   // Reset internal state management
   DecodedSize = 0;
+  if (MaxInst == 0) {
+    MaxInst = CTX->Config.MaxInstPerBlock;
+  }
+  this->MaxInst = MaxInst;
   MaxCondBranchForward = 0;
   MaxCondBranchBackwards = ~0ULL;
   DecodedBuffer = PoolObject.ReownOrClaimBuffer();
@@ -1548,8 +1552,7 @@ void Decoder::SetupDecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState*
   BlocksToDecode = {PC};
 
   CurrentBlockTargets.clear();
-  CurrentCodePage = PC & FEXCore::Utils::FEX_PAGE_MASK;
-  BlockInfo.CodePages = {CurrentCodePage};
+  BlockInfo.CodePages = {PC & FEXCore::Utils::FEX_PAGE_MASK};
 }
 
 void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thread, const uint8_t* _InstStream, uint64_t PC, uint64_t MaxInst) {
