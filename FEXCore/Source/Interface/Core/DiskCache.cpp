@@ -954,7 +954,8 @@ namespace DiskCache {
     const uint64_t MemoryCacheKey = MakeMemoryCacheKey(Hash, Entry.GuestSize, Entry.GuestHash);
     CodeHitData HitData;
     auto CachedBlob = LookupMemoryCache(MemoryCacheKey);
-    if (CachedBlob && CachedBlob->size() == Entry.Size) {
+    const bool FoundInMemoryCache = CachedBlob && CachedBlob->size() == Entry.Size;
+    if (FoundInMemoryCache) {
       // Match upstream: use the LRU as a read source, but give this lookup an
       // independent writable blob so applying relocations never changes cached bytes.
       HitData.Blob.assign(CachedBlob->begin(), CachedBlob->end());
@@ -1068,16 +1069,11 @@ namespace DiskCache {
       HitData.GuestPages.push_back(GuestPage);
     }
 
-    if (!HitData.CachedBlob) {
-      // Move into the LRU only after header/relocation validation has succeeded.
-      // Rebuild spans after adoption because they must refer to the shared allocation.
-      auto CachedBlob = StoreMemoryCache(MemoryCacheKey, std::move(HitData.Blob));
-      if (CachedBlob) {
-        HitData.CachedBlob = std::move(CachedBlob);
-        uint8_t* CachedData = HitData.CachedBlob->data();
-        HitData.EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(CachedData + HostCodeOffset + Header.HostSize),
-                               Header.EntryPointCount};
-      }
+    if (!FoundInMemoryCache) {
+      // Keep the validated serialized bytes in the LRU, but don't transfer the
+      // lookup's writable allocation: relocation must only touch HitData.Blob.
+      fextl::vector<uint8_t> MemoryCacheBlob(HitData.Blob.begin(), HitData.Blob.end());
+      (void)StoreMemoryCache(MemoryCacheKey, std::move(MemoryCacheBlob));
     }
     return HitData;
   }
