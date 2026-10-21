@@ -955,14 +955,16 @@ namespace DiskCache {
     CodeHitData HitData;
     auto CachedBlob = LookupMemoryCache(MemoryCacheKey);
     if (CachedBlob && CachedBlob->size() == Entry.Size) {
-      HitData.CachedBlob = std::move(CachedBlob);
+      // Match upstream: use the LRU as a read source, but give this lookup an
+      // independent writable blob so applying relocations never changes cached bytes.
+      HitData.Blob.assign(CachedBlob->begin(), CachedBlob->end());
     } else {
       HitData.Blob.resize(Entry.Size);
       if (!Entry.DB->ReadCacheBlob(Entry.Offset, HitData.Blob)) {
         return std::nullopt;
       }
     }
-    uint8_t* BlobData = HitData.CachedBlob ? HitData.CachedBlob->data() : HitData.Blob.data();
+    uint8_t* BlobData = HitData.Blob.data();
 
     if (Entry.Size < sizeof(BlobFixedHeader)) {
       return std::nullopt;
@@ -989,8 +991,6 @@ namespace DiskCache {
     }
     const size_t HostCodeOffset = sizeof(Header) + GuestExtentsBytes;
     HitData.HostCode = {BlobData + HostCodeOffset, Header.HostSize};
-    HitData.HostCodeCopy.assign(HitData.HostCode.begin(), HitData.HostCode.end());
-    HitData.HostCode = {HitData.HostCodeCopy.data(), HitData.HostCodeCopy.size()};
     HitData.EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(BlobData + HostCodeOffset + Header.HostSize),
                            Header.EntryPointCount};
 
