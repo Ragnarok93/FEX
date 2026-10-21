@@ -1336,6 +1336,16 @@ namespace DiskCache {
     memcpy(BlobData + HeaderOffset, &Header, sizeof(Header));
     memcpy(BlobData + sizeof(Header), GuestExtents.data(), GuestExtentsBytes);
     memcpy(BlobData + HostCodeOffset, CompiledCode.BlockBegin, CompiledCode.Size);
+    // Persist a relocation-neutral host-code image. The live JIT buffer has already
+    // had process-local symbols, thunk addresses, and patchable guest values resolved.
+    // Replaying those bytes and then applying the serialized relocations can leave
+    // stale host pointers in the cache image (notably when a 32-bit guest block is
+    // replayed in a new process). Normalize the private serialized copy before writing.
+    auto SerializedHostCode = std::span<std::byte> {
+      reinterpret_cast<std::byte*>(BlobData + HostCodeOffset), static_cast<size_t>(CompiledCode.Size)};
+    if (!CTX->CodeCache.ApplyCodeRelocations(GuestRIP, SerializedHostCode, Relocations, true)) {
+      return false;
+    }
     // Blob was value-initialized by resize(), so alignment padding is zero-filled.
 
     // pack and relocate entrypoints

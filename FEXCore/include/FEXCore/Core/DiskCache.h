@@ -261,7 +261,7 @@ namespace DiskCache {
 
     FEXCore::Context::ContextImpl* CTX;
     // Bumped for the serialized guest extents and patchable immediate/branch/CRC relocation records.
-    static const uint16_t FormatVersion = 6;
+    static const uint16_t FormatVersion = 7;
     XXH128_hash_t BucketHash;
     fextl::vector<fextl::unique_ptr<IndexedDB>> ROCacheDBs;
     fextl::unique_ptr<IndexedDB> RWCacheDB;
