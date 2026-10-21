@@ -116,10 +116,73 @@ namespace DiskCache {
     fextl::vector<FEXCore::CPU::Relocation> Relocations;
     fextl::vector<uint64_t> GuestPages;
 
-    // the spans above point to memory owned by the Blob vec, so it's important this can't be copied
     CodeHitData() = default;
-    CodeHitData(CodeHitData&&) = default;
-    CodeHitData& operator=(CodeHitData&&) = default;
+    CodeHitData(CodeHitData&& Other) {
+      *this = std::move(Other);
+    }
+    CodeHitData& operator=(CodeHitData&& Other) {
+      if (this == &Other) {
+        return *this;
+      }
+
+      // fextl::vector moves can copy their allocation in unoptimized builds.
+      // Save offsets before moving the owning vectors, then rebuild every span
+      // into the destination storage. Copying the old span pointers here leaves
+      // them dangling when the source vector's allocation is released.
+      const auto GetOffset = [](const void* Pointer, const void* Base, size_t Size) -> std::optional<size_t> {
+        if (!Pointer || !Base) {
+          return std::nullopt;
+        }
+        const uintptr_t P = reinterpret_cast<uintptr_t>(Pointer);
+        const uintptr_t B = reinterpret_cast<uintptr_t>(Base);
+        if (P < B || P - B > Size) {
+          return std::nullopt;
+        }
+        return static_cast<size_t>(P - B);
+      };
+
+      const size_t HostCodeSize = HostCode.size();
+      const auto HostCodeOffset = GetOffset(HostCode.data(), HostCodeCopy.data(), HostCodeCopy.size());
+      const size_t EntryPointCount = EntryPoints.size();
+      const auto EntryPointsOffset = CachedBlob
+        ? GetOffset(EntryPoints.data(), CachedBlob->data(), CachedBlob->size())
+        : GetOffset(EntryPoints.data(), Blob.data(), Blob.size());
+      const bool EntryPointsInCachedBlob = static_cast<bool>(CachedBlob);
+
+      Blob = std::move(Other.Blob);
+      HostCodeCopy = std::move(Other.HostCodeCopy);
+      CachedBlob = std::move(Other.CachedBlob);
+      Relocations = std::move(Other.Relocations);
+      GuestPages = std::move(Other.GuestPages);
+
+      if (HostCodeOffset && *HostCodeOffset <= HostCodeCopy.size() &&
+          HostCodeSize <= HostCodeCopy.size() - *HostCodeOffset) {
+        HostCode = {HostCodeCopy.data() + *HostCodeOffset, HostCodeSize};
+      } else {
+        HostCode = {};
+      }
+
+      const uint8_t* EntryPointBase = nullptr;
+      size_t EntryPointStorageSize = 0;
+      if (EntryPointsInCachedBlob && CachedBlob) {
+        EntryPointBase = CachedBlob->data();
+        EntryPointStorageSize = CachedBlob->size();
+      } else {
+        EntryPointBase = Blob.data();
+        EntryPointStorageSize = Blob.size();
+      }
+      const size_t EntryPointBytes = EntryPointCount * sizeof(BlobEntryPoint);
+      if (EntryPointsOffset && *EntryPointsOffset <= EntryPointStorageSize &&
+          EntryPointBytes <= EntryPointStorageSize - *EntryPointsOffset) {
+        EntryPoints = {reinterpret_cast<const BlobEntryPoint*>(EntryPointBase + *EntryPointsOffset), EntryPointCount};
+      } else {
+        EntryPoints = {};
+      }
+
+      Other.HostCode = {};
+      Other.EntryPoints = {};
+      return *this;
+    }
     CodeHitData(const CodeHitData&) = delete;
     CodeHitData& operator=(const CodeHitData&) = delete;
   };
